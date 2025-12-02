@@ -1,11 +1,9 @@
-version: '3.8'
-
 services:
   api:
     build: .
     container_name: taller_api
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - NODE_ENV=production
       - MONGODB_URI=mongodb://mongo:27017/taller
@@ -29,7 +27,7 @@ services:
     image: mongo:6.0
     container_name: taller_mongo
     ports:
-      - "27017:27017"
+      - "27018:27017"
     volumes:
       - mongo_data:/data/db
     restart: unless-stopped
@@ -40,7 +38,7 @@ services:
     image: redis:7.0-alpine
     container_name: taller_redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
