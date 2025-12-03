@@ -1,78 +1,87 @@
-const WorkOrder = require('../models/WorkOrder');
-const Quote = require('../models/Quote');
-const Mechanic = require('../models/Mechanic');
-const SystemLog = require('../models/SystemLog');
-const cacheService = require('../services/cacheService');
-const logger = require('../utils/logger');
-const { asyncHandler } = require('../middlewares/errorHandler');
+const Quote = require("../models/Quote");
+const Mechanic = require("../models/Mechanic");
+const SystemLog = require("../models/SystemLog");
+const cacheService = require("../services/cacheService");
+const logger = require("../utils/logger");
+const { asyncHandler } = require("../middlewares/errorHandler");
 
 // @desc    Listar órdenes de trabajo
 // @route   GET /api/orders
 // @access  Admin/Mechanic (mecánico solo ve las suyas)
 const listOrders = asyncHandler(async (req, res) => {
-  const { 
-    page = 1, 
-    limit = 20, 
+  const {
+    page = 1,
+    limit = 20,
     status,
     mechanicId,
     clientId,
     startDate,
     endDate,
     search,
-    sort = '-createdAt'
+    sort = "-createdAt",
   } = req.query;
 
-  // Construir query base
-  const query = { isDeleted: false };
-  
+  // Construir query base - buscar quotes que tengan workOrder
+  const query = {
+    isDeleted: false,
+    workOrder: { $exists: true, $ne: null },
+  };
+
   // Si es mecánico, solo ve sus órdenes
-  if (req.user.role === 'mechanic') {
+  if (req.user.role === "mechanic") {
     const mechanic = await Mechanic.findOne({ userId: req.userId });
     if (!mechanic) {
       return res.status(404).json({
         success: false,
         error: {
-          code: 'MECHANIC_NOT_FOUND',
-          message: 'Perfil de mecánico no encontrado'
-        }
+          code: "MECHANIC_NOT_FOUND",
+          message: "Perfil de mecánico no encontrado",
+        },
       });
     }
-    query.mechanicId = mechanic._id;
+    query["workOrder.mechanicId"] = mechanic._id;
   } else if (mechanicId) {
     // Admin puede filtrar por mecánico
-    query.mechanicId = mechanicId;
+    query["workOrder.mechanicId"] = mechanicId;
   }
 
-  if (status) query.status = status;
-  
+  if (status) query["workOrder.status"] = status;
+  if (clientId) query.clientId = clientId;
+
   if (startDate || endDate) {
-    query.createdAt = {};
-    if (startDate) query.createdAt.$gte = new Date(startDate);
-    if (endDate) query.createdAt.$lte = new Date(endDate);
+    query["workOrder.createdAt"] = {};
+    if (startDate) query["workOrder.createdAt"].$gte = new Date(startDate);
+    if (endDate) query["workOrder.createdAt"].$lte = new Date(endDate);
   }
 
   if (search) {
     query.$or = [
-      { orderNumber: { $regex: search, $options: 'i' } },
-      { 'vehicleSnapshot.licensePlate': { $regex: search, $options: 'i' } }
+      { "workOrder.orderNumber": { $regex: search, $options: "i" } },
+      { "vehicle.licensePlate": { $regex: search, $options: "i" } },
     ];
   }
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
 
-  const [orders, total] = await Promise.all([
-    WorkOrder.find(query)
-      .populate({
-        path: 'quoteId',
-        populate: { path: 'clientId', select: 'firstName lastName1 lastName2 email phone' }
-      })
-      .populate('mechanicId')
+  const [quotes, total] = await Promise.all([
+    Quote.find(query)
+      .populate("clientId", "firstName lastName1 lastName2 email phone")
+      .populate("workOrder.mechanicId")
       .sort(sort)
       .limit(parseInt(limit))
       .skip(skip)
       .lean(),
-    WorkOrder.countDocuments(query)
+    Quote.countDocuments(query),
   ]);
+
+  // Transformar para devolver solo la info de la orden con contexto del quote
+  const orders = quotes.map((quote) => ({
+    _id: quote._id,
+    quoteNumber: quote.quoteNumber,
+    client: quote.clientId,
+    vehicle: quote.vehicle,
+    order: quote.workOrder,
+  }));
 
   const result = {
     orders,
@@ -80,8 +89,8 @@ const listOrders = asyncHandler(async (req, res) => {
       page: parseInt(page),
       limit: parseInt(limit),
       total,
-      pages: Math.ceil(total / parseInt(limit))
-    }
+      pages: Math.ceil(total / parseInt(limit)),
+    },
   };
 
   res.json({ success: true, data: result });
@@ -93,38 +102,48 @@ const listOrders = asyncHandler(async (req, res) => {
 const getOrder = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const order = await WorkOrder.findById(id)
-    .populate({
-      path: 'quoteId',
-      populate: { path: 'clientId' }
-    })
-    .populate('mechanicId');
+  const quote = await Quote.findById(id)
+    .populate("clientId")
+    .populate("workOrder.mechanicId");
 
-  if (!order) {
+  if (!quote || !quote.workOrder) {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'ORDER_NOT_FOUND',
-        message: 'Orden de trabajo no encontrada'
-      }
+        code: "ORDER_NOT_FOUND",
+        message: "Orden de trabajo no encontrada",
+      },
     });
   }
 
   // Si es mecánico, verificar que sea su orden
-  if (req.user.role === 'mechanic') {
+  if (req.user.role === "mechanic") {
     const mechanic = await Mechanic.findOne({ userId: req.userId });
-    if (!mechanic || order.mechanicId?._id.toString() !== mechanic._id.toString()) {
+    if (
+      !mechanic ||
+      quote.workOrder.mechanicId?._id.toString() !== mechanic._id.toString()
+    ) {
       return res.status(403).json({
         success: false,
         error: {
-          code: 'FORBIDDEN',
-          message: 'No tienes permiso para ver esta orden'
-        }
+          code: "FORBIDDEN",
+          message: "No tienes permiso para ver esta orden",
+        },
       });
     }
   }
 
-  res.json({ success: true, data: { order } });
+  const orderData = {
+    _id: quote._id,
+    quoteNumber: quote.quoteNumber,
+    client: quote.clientId,
+    vehicle: quote.vehicle,
+    quoteDescription: quote.description,
+    proposedWork: quote.proposedWork,
+    order: quote.workOrder,
+  };
+
+  res.json({ success: true, data: { order: orderData } });
 });
 
 // @desc    Actualizar orden de trabajo
@@ -132,63 +151,67 @@ const getOrder = asyncHandler(async (req, res) => {
 // @access  Admin/Mechanic (mecánico solo la suya)
 const updateOrder = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { additionalNotes, additionalWork, finalCost, estimatedDelivery } = req.body;
+  const { additionalNotes, additionalWork, finalCost, estimatedDelivery } =
+    req.body;
 
-  const order = await WorkOrder.findById(id);
+  const quote = await Quote.findById(id);
 
-  if (!order) {
+  if (!quote || !quote.workOrder) {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'ORDER_NOT_FOUND',
-        message: 'Orden de trabajo no encontrada'
-      }
+        code: "ORDER_NOT_FOUND",
+        message: "Orden de trabajo no encontrada",
+      },
     });
   }
 
   // Si es mecánico, verificar que sea su orden
-  if (req.user.role === 'mechanic') {
+  if (req.user.role === "mechanic") {
     const mechanic = await Mechanic.findOne({ userId: req.userId });
-    if (!mechanic || order.mechanicId?.toString() !== mechanic._id.toString()) {
+    if (
+      !mechanic ||
+      quote.workOrder.mechanicId?.toString() !== mechanic._id.toString()
+    ) {
       return res.status(403).json({
         success: false,
         error: {
-          code: 'FORBIDDEN',
-          message: 'No tienes permiso para editar esta orden'
-        }
+          code: "FORBIDDEN",
+          message: "No tienes permiso para editar esta orden",
+        },
       });
     }
   }
 
-  // Actualizar campos
-  if (additionalNotes !== undefined) order.additionalNotes = additionalNotes;
-  if (additionalWork !== undefined) order.additionalWork = additionalWork;
-  if (finalCost !== undefined) order.finalCost = finalCost;
-  if (estimatedDelivery !== undefined) order.estimatedDelivery = estimatedDelivery;
-
-  await order.save();
-
-  await SystemLog.createLog({
-    level: 'info',
-    action: 'order_updated',
-    userId: req.userId,
-    module: 'orders',
-    metadata: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      changes: req.body
-    },
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+  // Actualizar usando el método del modelo
+  await quote.updateWorkOrder({
+    additionalNotes,
+    additionalWork,
+    finalCost,
+    estimatedDelivery,
   });
 
-  await cacheService.invalidateOrders();
+  await SystemLog.createLog({
+    level: "info",
+    action: "order_updated",
+    userId: req.userId,
+    module: "orders",
+    metadata: {
+      quoteId: quote._id,
+      orderNumber: quote.workOrder.orderNumber,
+      changes: req.body,
+    },
+    ipAddress: req.ip,
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
+  });
+
+  await cacheService.invalidateQuotes();
 
   res.json({
     success: true,
-    data: { order },
-    message: 'Orden actualizada exitosamente'
+    data: { order: quote.workOrder },
+    message: "Orden actualizada exitosamente",
   });
 });
 
@@ -199,86 +222,87 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { status, notes } = req.body;
 
-  const order = await WorkOrder.findById(id)
-    .populate({
-      path: 'quoteId',
-      populate: { path: 'clientId' }
-    });
+  const quote = await Quote.findById(id)
+    .populate("clientId")
+    .populate("workOrder.mechanicId");
 
-  if (!order) {
+  if (!quote || !quote.workOrder) {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'ORDER_NOT_FOUND',
-        message: 'Orden de trabajo no encontrada'
-      }
+        code: "ORDER_NOT_FOUND",
+        message: "Orden de trabajo no encontrada",
+      },
     });
   }
 
   // Si es mecánico, verificar que sea su orden
-  if (req.user.role === 'mechanic') {
+  if (req.user.role === "mechanic") {
     const mechanic = await Mechanic.findOne({ userId: req.userId });
-    if (!mechanic || order.mechanicId?.toString() !== mechanic._id.toString()) {
+    if (
+      !mechanic ||
+      quote.workOrder.mechanicId?.toString() !== mechanic._id.toString()
+    ) {
       return res.status(403).json({
         success: false,
         error: {
-          code: 'FORBIDDEN',
-          message: 'No tienes permiso para modificar esta orden'
-        }
+          code: "FORBIDDEN",
+          message: "No tienes permiso para modificar esta orden",
+        },
       });
     }
   }
 
   // Cambiar estado con validación
   try {
-    await order.changeStatus(status, req.userId, notes);
+    await quote.changeWorkOrderStatus(status, req.userId, notes);
   } catch (error) {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'INVALID_STATUS_TRANSITION',
-        message: error.message
-      }
+        code: "INVALID_STATUS_TRANSITION",
+        message: error.message,
+      },
     });
   }
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'order_status_changed',
+    level: "info",
+    action: "order_status_changed",
     userId: req.userId,
-    module: 'orders',
+    module: "orders",
     metadata: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
+      quoteId: quote._id,
+      orderNumber: quote.workOrder.orderNumber,
       newStatus: status,
-      notes
+      notes,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
-  logger.info('Estado de orden cambiado', {
-    module: 'orders',
-    action: 'status_changed',
+  logger.info("Estado de orden cambiado", {
+    module: "orders",
+    action: "status_changed",
     userId: req.userId,
     metadata: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      newStatus: status
-    }
+      quoteId: quote._id,
+      orderNumber: quote.workOrder.orderNumber,
+      newStatus: status,
+    },
   });
 
-  await cacheService.invalidateOrders();
+  await cacheService.invalidateQuotes();
 
   // Verificar si se envió email automáticamente
-  const emailSent = status === 'listo' && order.readyEmailSent;
+  const emailSent = status === "listo" && quote.workOrder.readyEmailSent;
 
   res.json({
     success: true,
-    data: { order },
+    data: { order: quote.workOrder },
     message: `Estado actualizado a "${status}" exitosamente`,
-    emailSent
+    emailSent,
   });
 });
 
@@ -289,15 +313,15 @@ const assignMechanic = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { mechanicId } = req.body;
 
-  const order = await WorkOrder.findById(id);
+  const quote = await Quote.findById(id);
 
-  if (!order) {
+  if (!quote || !quote.workOrder) {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'ORDER_NOT_FOUND',
-        message: 'Orden de trabajo no encontrada'
-      }
+        code: "ORDER_NOT_FOUND",
+        message: "Orden de trabajo no encontrada",
+      },
     });
   }
 
@@ -308,9 +332,9 @@ const assignMechanic = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'MECHANIC_NOT_FOUND',
-        message: 'Mecánico no encontrado'
-      }
+        code: "MECHANIC_NOT_FOUND",
+        message: "Mecánico no encontrado",
+      },
     });
   }
 
@@ -318,127 +342,119 @@ const assignMechanic = asyncHandler(async (req, res) => {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'MECHANIC_INACTIVE',
-        message: 'El mecánico no está activo'
-      }
+        code: "MECHANIC_INACTIVE",
+        message: "El mecánico no está activo",
+      },
     });
   }
 
-  const previousMechanicId = order.mechanicId;
-  order.mechanicId = mechanicId;
-
-  // Si está en pendiente_asignacion, cambiar a asignada
-  if (order.status === 'pendiente_asignacion') {
-    await order.changeStatus('asignada', req.userId, 'Mecánico asignado');
-  } else {
-    await order.save();
-  }
+  // Asignar mecánico usando el método del modelo
+  await quote.assignMechanic(mechanicId, req.userId);
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'mechanic_assigned',
+    level: "info",
+    action: "mechanic_assigned",
     userId: req.userId,
-    module: 'orders',
+    module: "orders",
     metadata: {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      previousMechanicId,
-      newMechanicId: mechanicId,
-      mechanicName: mechanic.getFullName()
+      quoteId: quote._id,
+      orderNumber: quote.workOrder.orderNumber,
+      mechanicId,
+      mechanicName: mechanic.getFullName(),
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
-  logger.info('Mecánico asignado a orden', {
-    module: 'orders',
-    action: 'mechanic_assigned',
+  logger.info("Mecánico asignado a orden", {
+    module: "orders",
+    action: "mechanic_assigned",
     userId: req.userId,
     metadata: {
-      orderId: order._id,
-      mechanicId
-    }
+      quoteId: quote._id,
+      mechanicId,
+    },
   });
 
-  await cacheService.invalidateOrders();
-  await cacheService.invalidateMechanics();
+  await cacheService.invalidateQuotes();
 
   res.json({
     success: true,
-    data: { order },
-    message: 'Mecánico asignado exitosamente'
+    data: { order: quote.workOrder },
+    message: "Mecánico asignado exitosamente",
   });
 });
 
-// @desc    Eliminar orden (soft delete)
+// @desc    Eliminar orden (soft delete del quote si la orden está pendiente)
 // @route   DELETE /api/orders/:id
 // @access  Admin
 const deleteOrder = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const order = await WorkOrder.findById(id);
+  const quote = await Quote.findById(id);
 
-  if (!order) {
+  if (!quote || !quote.workOrder) {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'ORDER_NOT_FOUND',
-        message: 'Orden de trabajo no encontrada'
-      }
+        code: "ORDER_NOT_FOUND",
+        message: "Orden de trabajo no encontrada",
+      },
     });
   }
 
-  if (order.isDeleted) {
+  if (quote.isDeleted) {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'ORDER_ALREADY_DELETED',
-        message: 'La orden ya está eliminada'
-      }
+        code: "ORDER_ALREADY_DELETED",
+        message: "La orden ya está eliminada",
+      },
     });
   }
 
   // Verificar si se puede eliminar
-  if (!order.canDelete()) {
+  if (!quote.canDeleteWorkOrder()) {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'CANNOT_DELETE_ORDER',
-        message: 'Solo se pueden eliminar órdenes en estado "pendiente_asignacion"'
-      }
+        code: "CANNOT_DELETE_ORDER",
+        message:
+          'Solo se pueden eliminar órdenes en estado "pendiente_asignacion"',
+      },
     });
   }
 
-  // Soft delete
-  await order.softDelete(req.userId);
+  // Soft delete del quote completo (incluye la orden)
+  await quote.softDelete(req.userId);
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'order_deleted',
+    level: "info",
+    action: "order_deleted",
     userId: req.userId,
-    module: 'orders',
+    module: "orders",
     metadata: {
-      orderId: order._id,
-      orderNumber: order.orderNumber
+      quoteId: quote._id,
+      orderNumber: quote.workOrder.orderNumber,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
-  logger.info('Orden eliminada', {
-    module: 'orders',
-    action: 'delete_success',
+  logger.info("Orden eliminada", {
+    module: "orders",
+    action: "delete_success",
     userId: req.userId,
-    metadata: { orderId: order._id }
+    metadata: { quoteId: quote._id },
   });
 
-  await cacheService.invalidateOrders();
+  await cacheService.invalidateQuotes();
 
   res.json({
     success: true,
-    message: 'Orden eliminada exitosamente'
+    message: "Orden eliminada exitosamente",
   });
 });
 
@@ -448,5 +464,5 @@ module.exports = {
   updateOrder,
   updateOrderStatus,
   assignMechanic,
-  deleteOrder
+  deleteOrder,
 };

@@ -1,30 +1,32 @@
-const Quote = require('../models/Quote');
-const Client = require('../models/Client');
-const WorkOrder = require('../models/WorkOrder');
-const SystemLog = require('../models/SystemLog');
-const emailService = require('../services/emailService');
-const cacheService = require('../services/cacheService');
-const logger = require('../utils/logger');
-const { asyncHandler } = require('../middlewares/errorHandler');
+const Quote = require("../models/Quote");
+const Client = require("../models/Client");
+const Mechanic = require("../models/Mechanic");
+const SystemLog = require("../models/SystemLog");
+const emailService = require("../services/emailService");
+const cacheService = require("../services/cacheService");
+const logger = require("../utils/logger");
+const { asyncHandler } = require("../middlewares/errorHandler");
 
 // @desc    Listar presupuestos
 // @route   GET /api/quotes
 // @access  Admin
 const listQuotes = asyncHandler(async (req, res) => {
-  const { 
-    page = 1, 
-    limit = 20, 
+  const {
+    page = 1,
+    limit = 20,
     status,
     clientId,
     startDate,
     endDate,
     search,
-    sort = '-createdAt'
+    sort = "-createdAt",
   } = req.query;
 
   // Construir clave de caché
-  const cacheKey = `cache:quotes:list:${page}:${limit}:${status || 'all'}:${clientId || 'all'}:${search || 'all'}`;
-  
+  const cacheKey = `cache:quotes:list:${page}:${limit}:${status || "all"}:${
+    clientId || "all"
+  }:${search || "all"}`;
+
   const cached = await cacheService.get(cacheKey);
   if (cached) {
     return res.json({ success: true, data: cached, cached: true });
@@ -32,10 +34,10 @@ const listQuotes = asyncHandler(async (req, res) => {
 
   // Construir query
   const query = { isDeleted: false };
-  
+
   if (status) query.status = status;
   if (clientId) query.clientId = clientId;
-  
+
   if (startDate || endDate) {
     query.createdAt = {};
     if (startDate) query.createdAt.$gte = new Date(startDate);
@@ -44,8 +46,8 @@ const listQuotes = asyncHandler(async (req, res) => {
 
   if (search) {
     query.$or = [
-      { quoteNumber: { $regex: search, $options: 'i' } },
-      { 'vehicle.licensePlate': { $regex: search, $options: 'i' } }
+      { quoteNumber: { $regex: search, $options: "i" } },
+      { "vehicle.licensePlate": { $regex: search, $options: "i" } },
     ];
   }
 
@@ -53,12 +55,13 @@ const listQuotes = asyncHandler(async (req, res) => {
 
   const [quotes, total] = await Promise.all([
     Quote.find(query)
-      .populate('clientId', 'firstName lastName1 lastName2 email phone')
+      .populate("clientId", "firstName lastName1 lastName2 email phone")
+      .populate("workOrder.mechanicId")
       .sort(sort)
       .limit(parseInt(limit))
       .skip(skip)
       .lean(),
-    Quote.countDocuments(query)
+    Quote.countDocuments(query),
   ]);
 
   const result = {
@@ -67,8 +70,8 @@ const listQuotes = asyncHandler(async (req, res) => {
       page: parseInt(page),
       limit: parseInt(limit),
       total,
-      pages: Math.ceil(total / parseInt(limit))
-    }
+      pages: Math.ceil(total / parseInt(limit)),
+    },
   };
 
   await cacheService.set(cacheKey, result, 180);
@@ -89,16 +92,16 @@ const getQuote = asyncHandler(async (req, res) => {
   }
 
   const quote = await Quote.findById(id)
-    .populate('clientId')
-    .populate('workOrderId');
+    .populate("clientId")
+    .populate("workOrder.mechanicId");
 
   if (!quote) {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'QUOTE_NOT_FOUND',
-        message: 'Presupuesto no encontrado'
-      }
+        code: "QUOTE_NOT_FOUND",
+        message: "Presupuesto no encontrado",
+      },
     });
   }
 
@@ -111,14 +114,8 @@ const getQuote = asyncHandler(async (req, res) => {
 // @route   POST /api/quotes
 // @access  Admin
 const createQuote = asyncHandler(async (req, res) => {
-  const {
-    clientId,
-    vehicle,
-    description,
-    proposedWork,
-    estimatedCost,
-    notes
-  } = req.body;
+  const { clientId, vehicle, description, proposedWork, estimatedCost, notes } =
+    req.body;
 
   // Verificar que el cliente existe
   const client = await Client.findById(clientId);
@@ -126,9 +123,9 @@ const createQuote = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'CLIENT_NOT_FOUND',
-        message: 'Cliente no encontrado'
-      }
+        code: "CLIENT_NOT_FOUND",
+        message: "Cliente no encontrado",
+      },
     });
   }
 
@@ -139,31 +136,31 @@ const createQuote = asyncHandler(async (req, res) => {
     description,
     proposedWork,
     estimatedCost,
-    notes
+    notes,
   });
 
   // Log
   await SystemLog.createLog({
-    level: 'info',
-    action: 'quote_created',
+    level: "info",
+    action: "quote_created",
     userId: req.userId,
-    module: 'quotes',
+    module: "quotes",
     metadata: {
       quoteId: quote._id,
       quoteNumber: quote.quoteNumber,
       clientId,
-      estimatedCost
+      estimatedCost,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
-  logger.info('Presupuesto creado', {
-    module: 'quotes',
-    action: 'create_success',
+  logger.info("Presupuesto creado", {
+    module: "quotes",
+    action: "create_success",
     userId: req.userId,
-    metadata: { quoteId: quote._id, quoteNumber: quote.quoteNumber }
+    metadata: { quoteId: quote._id, quoteNumber: quote.quoteNumber },
   });
 
   await cacheService.invalidateQuotes();
@@ -171,7 +168,7 @@ const createQuote = asyncHandler(async (req, res) => {
   res.status(201).json({
     success: true,
     data: { quote },
-    message: 'Presupuesto creado exitosamente'
+    message: "Presupuesto creado exitosamente",
   });
 });
 
@@ -188,9 +185,9 @@ const updateQuote = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'QUOTE_NOT_FOUND',
-        message: 'Presupuesto no encontrado'
-      }
+        code: "QUOTE_NOT_FOUND",
+        message: "Presupuesto no encontrado",
+      },
     });
   }
 
@@ -198,9 +195,10 @@ const updateQuote = asyncHandler(async (req, res) => {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'QUOTE_CANNOT_EDIT',
-        message: 'Solo se pueden editar presupuestos en estado pendiente'
-      }
+        code: "QUOTE_CANNOT_EDIT",
+        message:
+          "Solo se pueden editar presupuestos en estado pendiente sin orden de trabajo",
+      },
     });
   }
 
@@ -212,14 +210,14 @@ const updateQuote = asyncHandler(async (req, res) => {
   await quote.save();
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'quote_updated',
+    level: "info",
+    action: "quote_updated",
     userId: req.userId,
-    module: 'quotes',
+    module: "quotes",
     metadata: { quoteId: quote._id, changes: req.body },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
   await cacheService.invalidateQuotes();
@@ -228,7 +226,7 @@ const updateQuote = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: { quote },
-    message: 'Presupuesto actualizado exitosamente'
+    message: "Presupuesto actualizado exitosamente",
   });
 });
 
@@ -244,19 +242,19 @@ const sendQuoteEmail = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'QUOTE_NOT_FOUND',
-        message: 'Presupuesto no encontrado'
-      }
+        code: "QUOTE_NOT_FOUND",
+        message: "Presupuesto no encontrado",
+      },
     });
   }
 
-  if (quote.status !== 'pending') {
+  if (quote.status !== "pending") {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'QUOTE_ALREADY_PROCESSED',
-        message: 'El presupuesto ya fue procesado'
-      }
+        code: "QUOTE_ALREADY_PROCESSED",
+        message: "El presupuesto ya fue procesado",
+      },
     });
   }
 
@@ -266,9 +264,9 @@ const sendQuoteEmail = asyncHandler(async (req, res) => {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'CLIENT_NO_EMAIL',
-        message: 'El cliente no tiene un email válido'
-      }
+        code: "CLIENT_NO_EMAIL",
+        message: "El cliente no tiene un email válido",
+      },
     });
   }
 
@@ -276,10 +274,8 @@ const sendQuoteEmail = asyncHandler(async (req, res) => {
   const tokens = quote.generateTokens();
   await quote.save();
 
-  console.log(">>> Enviando email...");
   // Enviar email
   const result = await emailService.sendQuoteEmail(quote, client, tokens);
-  console.log(">>> Resultado del email:", result);
 
   if (!result.success) {
     quote.emailAttempts += 1;
@@ -288,10 +284,10 @@ const sendQuoteEmail = asyncHandler(async (req, res) => {
     return res.status(500).json({
       success: false,
       error: {
-        code: 'EMAIL_SEND_FAILED',
-        message: 'Error al enviar el correo electrónico',
-        details: result.error
-      }
+        code: "EMAIL_SEND_FAILED",
+        message: "Error al enviar el correo electrónico",
+        details: result.error,
+      },
     });
   }
 
@@ -301,29 +297,29 @@ const sendQuoteEmail = asyncHandler(async (req, res) => {
   await quote.save();
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'quote_email_sent',
+    level: "info",
+    action: "quote_email_sent",
     userId: req.userId,
-    module: 'quotes',
+    module: "quotes",
     metadata: {
       quoteId: quote._id,
       quoteNumber: quote.quoteNumber,
-      clientEmail: client.email
+      clientEmail: client.email,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
   await cacheService.invalidateQuotes();
 
   res.json({
     success: true,
-    message: 'Presupuesto enviado por correo exitosamente',
+    message: "Presupuesto enviado por correo exitosamente",
     data: {
       emailSent: true,
-      emailSentAt: quote.emailSentAt
-    }
+      emailSentAt: quote.emailSentAt,
+    },
   });
 });
 
@@ -345,7 +341,7 @@ const approveQuote = asyncHandler(async (req, res) => {
     `);
   }
 
-  const quote = await Quote.findById(id).populate('clientId');
+  const quote = await Quote.findById(id).populate("clientId");
 
   if (!quote) {
     return res.status(404).send(`
@@ -371,39 +367,28 @@ const approveQuote = asyncHandler(async (req, res) => {
   }
 
   // Usar token y aprobar
-  await quote.useToken(token, req.ip, req.get('user-agent'));
-  quote.status = 'approved';
+  await quote.useToken(token, req.ip, req.get("user-agent"));
+  quote.status = "approved";
   await quote.save();
 
-  // Crear orden de trabajo automáticamente
-  const order = await WorkOrder.create({
-    quoteId: quote._id,
-    vehicleSnapshot: quote.vehicle,
-    workDescription: `${quote.description}\n\nTrabajo propuesto:\n${quote.proposedWork}`,
-    estimatedCost: quote.estimatedCost,
-    status: 'pendiente_asignacion'
-  });
-
-  // Vincular orden al presupuesto
-  quote.workOrderId = order._id;
-  await quote.save();
+  // Crear orden de trabajo automáticamente (como subdocumento)
+  await quote.createWorkOrder();
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'quote_approved_by_client',
-    module: 'quotes',
+    level: "info",
+    action: "quote_approved_by_client",
+    module: "quotes",
     metadata: {
       quoteId: quote._id,
       quoteNumber: quote.quoteNumber,
-      orderNumber: order.orderNumber,
-      clientId: quote.clientId._id
+      orderNumber: quote.workOrder.orderNumber,
+      clientId: quote.clientId._id,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent')
+    userAgent: req.get("user-agent"),
   });
 
   await cacheService.invalidateQuotes();
-  await cacheService.invalidateOrders();
 
   res.send(`
     <!DOCTYPE html>
@@ -424,7 +409,7 @@ const approveQuote = asyncHandler(async (req, res) => {
         <p>¡Gracias por aprobar el presupuesto <strong>${quote.quoteNumber}</strong>!</p>
         <div class="info">
           <p>Se ha creado automáticamente la orden de trabajo:</p>
-          <p class="order-number">${order.orderNumber}</p>
+          <p class="order-number">${quote.workOrder.orderNumber}</p>
         </div>
         <p>Nuestro equipo comenzará a trabajar en su vehículo pronto.</p>
         <p>Le notificaremos por correo cuando esté listo.</p>
@@ -457,7 +442,7 @@ const rejectQuote = asyncHandler(async (req, res) => {
     `);
   }
 
-  const quote = await Quote.findById(id).populate('clientId');
+  const quote = await Quote.findById(id).populate("clientId");
 
   if (!quote) {
     return res.status(404).send(`
@@ -481,21 +466,21 @@ const rejectQuote = asyncHandler(async (req, res) => {
     `);
   }
 
-  await quote.useToken(token, req.ip, req.get('user-agent'));
-  quote.status = 'rejected';
+  await quote.useToken(token, req.ip, req.get("user-agent"));
+  quote.status = "rejected";
   await quote.save();
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'quote_rejected_by_client',
-    module: 'quotes',
+    level: "info",
+    action: "quote_rejected_by_client",
+    module: "quotes",
     metadata: {
       quoteId: quote._id,
       quoteNumber: quote.quoteNumber,
-      clientId: quote.clientId._id
+      clientId: quote.clientId._id,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent')
+    userAgent: req.get("user-agent"),
   });
 
   await cacheService.invalidateQuotes();
@@ -539,50 +524,43 @@ const approveQuoteManual = asyncHandler(async (req, res) => {
   if (!quote) {
     return res.status(404).json({
       success: false,
-      error: { code: 'QUOTE_NOT_FOUND', message: 'Presupuesto no encontrado' }
+      error: { code: "QUOTE_NOT_FOUND", message: "Presupuesto no encontrado" },
     });
   }
 
-  if (quote.status !== 'pending') {
+  if (quote.status !== "pending") {
     return res.status(400).json({
       success: false,
-      error: { code: 'QUOTE_ALREADY_PROCESSED', message: 'El presupuesto ya fue procesado' }
+      error: {
+        code: "QUOTE_ALREADY_PROCESSED",
+        message: "El presupuesto ya fue procesado",
+      },
     });
   }
 
-  quote.status = 'approved';
+  quote.status = "approved";
   await quote.save();
 
   // Crear orden automáticamente
-  const order = await WorkOrder.create({
-    quoteId: quote._id,
-    vehicleSnapshot: quote.vehicle,
-    workDescription: `${quote.description}\n\nTrabajo propuesto:\n${quote.proposedWork}`,
-    estimatedCost: quote.estimatedCost,
-    status: 'pendiente_asignacion'
-  });
-
-  quote.workOrderId = order._id;
-  await quote.save();
+  await quote.createWorkOrder();
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'quote_approved_by_admin',
+    level: "info",
+    action: "quote_approved_by_admin",
     userId: req.userId,
-    module: 'quotes',
-    metadata: { quoteId: quote._id, orderNumber: order.orderNumber },
+    module: "quotes",
+    metadata: { quoteId: quote._id, orderNumber: quote.workOrder.orderNumber },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
   await cacheService.invalidateQuotes();
-  await cacheService.invalidateOrders();
 
   res.json({
     success: true,
-    message: 'Presupuesto aprobado y orden creada',
-    data: { quote, order }
+    message: "Presupuesto aprobado y orden creada",
+    data: { quote },
   });
 });
 
@@ -597,37 +575,112 @@ const rejectQuoteManual = asyncHandler(async (req, res) => {
   if (!quote) {
     return res.status(404).json({
       success: false,
-      error: { code: 'QUOTE_NOT_FOUND', message: 'Presupuesto no encontrado' }
+      error: { code: "QUOTE_NOT_FOUND", message: "Presupuesto no encontrado" },
     });
   }
 
-  if (quote.status !== 'pending') {
+  if (quote.status !== "pending") {
     return res.status(400).json({
       success: false,
-      error: { code: 'QUOTE_ALREADY_PROCESSED', message: 'El presupuesto ya fue procesado' }
+      error: {
+        code: "QUOTE_ALREADY_PROCESSED",
+        message: "El presupuesto ya fue procesado",
+      },
     });
   }
 
-  quote.status = 'rejected';
+  quote.status = "rejected";
   await quote.save();
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'quote_rejected_by_admin',
+    level: "info",
+    action: "quote_rejected_by_admin",
     userId: req.userId,
-    module: 'quotes',
+    module: "quotes",
     metadata: { quoteId: quote._id },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
   await cacheService.invalidateQuotes();
 
   res.json({
     success: true,
-    message: 'Presupuesto rechazado',
-    data: { quote }
+    message: "Presupuesto rechazado",
+    data: { quote },
+  });
+});
+
+// @desc    Eliminar presupuesto (soft delete)
+// @route   DELETE /api/quotes/:id
+// @access  Admin
+const deleteQuote = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const quote = await Quote.findById(id);
+
+  if (!quote) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: "QUOTE_NOT_FOUND",
+        message: "Presupuesto no encontrado",
+      },
+    });
+  }
+
+  if (quote.isDeleted) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "QUOTE_ALREADY_DELETED",
+        message: "El presupuesto ya está eliminado",
+      },
+    });
+  }
+
+  // Verificar si se puede eliminar
+  if (!quote.canDelete()) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "CANNOT_DELETE_QUOTE",
+        message:
+          "Solo se pueden eliminar presupuestos pendientes sin orden de trabajo",
+      },
+    });
+  }
+
+  // Soft delete
+  await quote.softDelete(req.userId);
+
+  await SystemLog.createLog({
+    level: "info",
+    action: "quote_deleted",
+    userId: req.userId,
+    module: "quotes",
+    metadata: {
+      quoteId: quote._id,
+      quoteNumber: quote.quoteNumber,
+    },
+    ipAddress: req.ip,
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
+  });
+
+  logger.info("Presupuesto eliminado", {
+    module: "quotes",
+    action: "delete_success",
+    userId: req.userId,
+    metadata: { quoteId: quote._id },
+  });
+
+  await cacheService.invalidateQuotes();
+
+  res.json({
+    success: true,
+    message: "Presupuesto eliminado exitosamente",
   });
 });
 
@@ -640,5 +693,6 @@ module.exports = {
   approveQuote,
   rejectQuote,
   approveQuoteManual,
-  rejectQuoteManual
+  rejectQuoteManual,
+  deleteQuote,
 };

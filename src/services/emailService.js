@@ -1,22 +1,22 @@
-const nodemailer = require('nodemailer');
-const logger = require('../utils/logger');
-const SystemLog = require('../models/SystemLog');
+const nodemailer = require("nodemailer");
+const logger = require("../utils/logger");
+const SystemLog = require("../models/SystemLog");
 
 class EmailService {
   constructor() {
     this.transporter = null;
     this.maxRetries = parseInt(process.env.EMAIL_MAX_RETRIES) || 3;
-    this.retryDelays = (process.env.EMAIL_RETRY_DELAYS || '0,300000,900000')
-      .split(',')
-      .map(d => parseInt(d));
+    this.retryDelays = (process.env.EMAIL_RETRY_DELAYS || "0,300000,900000")
+      .split(",")
+      .map((d) => parseInt(d));
     this.timeout = parseInt(process.env.EMAIL_TIMEOUT) || 10000;
     this.workshopInfo = {
-      name: process.env.WORKSHOP_NAME || 'Taller Mecánico',
-      email: process.env.WORKSHOP_EMAIL || 'contacto@taller.com',
-      phone: process.env.WORKSHOP_PHONE || '+56912345678',
-      address: process.env.WORKSHOP_ADDRESS || 'Dirección del taller'
+      name: process.env.WORKSHOP_NAME || "Taller Mecánico",
+      email: process.env.WORKSHOP_EMAIL || "contacto@taller.com",
+      phone: process.env.WORKSHOP_PHONE || "+56912345678",
+      address: process.env.WORKSHOP_ADDRESS || "Dirección del taller",
     };
-    this.frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    this.frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
   }
 
   async initialize() {
@@ -27,23 +27,23 @@ class EmailService {
         secure: false,
         auth: {
           user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS
+          pass: process.env.SMTP_PASS,
         },
         connectionTimeout: this.timeout,
         greetingTimeout: this.timeout,
-        socketTimeout: this.timeout
+        socketTimeout: this.timeout,
       });
 
       await this.transporter.verify();
-      logger.info('Servicio de email inicializado correctamente', {
-        module: 'email',
-        action: 'initialize'
+      logger.info("Servicio de email inicializado correctamente", {
+        module: "email",
+        action: "initialize",
       });
     } catch (error) {
-      logger.error('Error inicializando servicio de email:', {
-        module: 'email',
-        action: 'initialize_error',
-        metadata: { error: error.message }
+      logger.error("Error inicializando servicio de email:", {
+        module: "email",
+        action: "initialize_error",
+        metadata: { error: error.message },
       });
     }
   }
@@ -51,35 +51,35 @@ class EmailService {
   async sendWithRetry(mailOptions, attempt = 0) {
     try {
       const info = await this.transporter.sendMail(mailOptions);
-      logger.info('Email enviado exitosamente', {
-        module: 'email',
-        action: 'send_success',
-        metadata: { 
+      logger.info("Email enviado exitosamente", {
+        module: "email",
+        action: "send_success",
+        metadata: {
           to: mailOptions.to,
           subject: mailOptions.subject,
-          attempt: attempt + 1
-        }
+          attempt: attempt + 1,
+        },
       });
       return { success: true, info };
     } catch (error) {
       logger.error(`Error enviando email (intento ${attempt + 1})`, {
-        module: 'email',
-        action: 'send_error',
-        metadata: { 
+        module: "email",
+        action: "send_error",
+        metadata: {
           to: mailOptions.to,
           error: error.message,
-          attempt: attempt + 1
-        }
+          attempt: attempt + 1,
+        },
       });
 
       if (attempt < this.maxRetries - 1) {
         const delay = this.retryDelays[attempt + 1] || 0;
         if (delay > 0) {
           logger.info(`Reintentando envío en ${delay}ms`, {
-            module: 'email',
-            action: 'retry_scheduled'
+            module: "email",
+            action: "retry_scheduled",
           });
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
         return await this.sendWithRetry(mailOptions, attempt + 1);
       }
@@ -139,7 +139,9 @@ class EmailService {
         <p><span class="label">Modelo:</span> ${quote.vehicle.model}</p>
         <p><span class="label">Año:</span> ${quote.vehicle.year}</p>
         <p><span class="label">Patente:</span> ${quote.vehicle.licensePlate}</p>
-        <p><span class="label">Kilometraje:</span> ${quote.vehicle.mileage} km</p>
+        <p><span class="label">Kilometraje:</span> ${
+          quote.vehicle.mileage
+        } km</p>
       </div>
       
       <div class="section">
@@ -153,11 +155,13 @@ class EmailService {
       </div>
       
       <div class="cost">
-        Costo Estimado: CLP $${quote.estimatedCost.toLocaleString('es-CL')}
+        Costo Estimado: CLP $${quote.estimatedCost.toLocaleString("es-CL")}
       </div>
       
       <div class="warning">
-        <strong>⚠️ Este presupuesto es válido hasta el ${new Date(quote.validUntil).toLocaleDateString('es-CL')}</strong>
+        <strong>⚠️ Este presupuesto es válido hasta el ${new Date(
+          quote.validUntil
+        ).toLocaleDateString("es-CL")}</strong>
       </div>
       
       <div class="buttons">
@@ -187,7 +191,7 @@ class EmailService {
       from: `"${this.workshopInfo.name}" <${this.workshopInfo.email}>`,
       to: client.email,
       subject: `Presupuesto ${quote.quoteNumber} - ${this.workshopInfo.name}`,
-      html
+      html,
     };
   }
 
@@ -200,21 +204,23 @@ class EmailService {
     const result = await this.sendWithRetry(mailOptions);
 
     await SystemLog.createLog({
-      level: result.success ? 'info' : 'error',
-      action: result.success ? 'quote_email_sent' : 'quote_email_failed',
-      module: 'email',
+      level: result.success ? "info" : "error",
+      action: result.success ? "quote_email_sent" : "quote_email_failed",
+      module: "email",
       metadata: {
         quoteId: quote._id,
         quoteNumber: quote.quoteNumber,
         clientEmail: client.email,
-        error: result.error
-      }
+        error: result.error,
+      },
     });
 
     return result;
   }
 
-  generateReadyEmail(order, quote, client) {
+  generateReadyEmail(quote, client) {
+    const order = quote.workOrder;
+
     const html = `
 <!DOCTYPE html>
 <html>
@@ -251,22 +257,32 @@ class EmailService {
       
       <div class="section vehicle-info">
         <h3>Datos del Vehículo</h3>
-        <p><span class="label">Marca:</span> ${order.vehicleSnapshot.brand}</p>
-        <p><span class="label">Modelo:</span> ${order.vehicleSnapshot.model}</p>
-        <p><span class="label">Patente:</span> ${order.vehicleSnapshot.licensePlate}</p>
+        <p><span class="label">Marca:</span> ${quote.vehicle.brand}</p>
+        <p><span class="label">Modelo:</span> ${quote.vehicle.model}</p>
+        <p><span class="label">Patente:</span> ${quote.vehicle.licensePlate}</p>
       </div>
       
       <div class="section">
         <h3>Trabajos Realizados</h3>
         <p>${order.workDescription}</p>
-        ${order.additionalWork ? `<p><strong>Trabajos Adicionales:</strong> ${order.additionalWork}</p>` : ''}
+        ${
+          order.additionalWork
+            ? `<p><strong>Trabajos Adicionales:</strong> ${order.additionalWork}</p>`
+            : ""
+        }
       </div>
       
-      ${order.finalCost ? `
+      ${
+        order.finalCost
+          ? `
         <div class="section">
-          <p><span class="label">Costo Final:</span> CLP $${order.finalCost.toLocaleString('es-CL')}</p>
+          <p><span class="label">Costo Final:</span> CLP $${order.finalCost.toLocaleString(
+            "es-CL"
+          )}</p>
         </div>
-      ` : ''}
+      `
+          : ""
+      }
       
       <div class="section">
         <h3>Para Retirar su Vehículo</h3>
@@ -299,38 +315,35 @@ class EmailService {
       from: `"${this.workshopInfo.name}" <${this.workshopInfo.email}>`,
       to: client.email,
       subject: `¡Su vehículo está listo! - Orden ${order.orderNumber}`,
-      html
+      html,
     };
   }
 
-  async sendReadyNotification(order) {
+  async sendReadyNotification(quote) {
     if (!this.transporter) {
       await this.initialize();
     }
 
-    const Quote = require('../models/Quote');
-    const Client = require('../models/Client');
-
-    const quote = await Quote.findById(order.quoteId);
+    const Client = require("../models/Client");
     const client = await Client.findById(quote.clientId);
 
     if (!client || !client.email) {
-      throw new Error('Cliente sin email válido');
+      throw new Error("Cliente sin email válido");
     }
 
-    const mailOptions = this.generateReadyEmail(order, quote, client);
+    const mailOptions = this.generateReadyEmail(quote, client);
     const result = await this.sendWithRetry(mailOptions);
 
     await SystemLog.createLog({
-      level: result.success ? 'info' : 'error',
-      action: result.success ? 'ready_email_sent' : 'ready_email_failed',
-      module: 'email',
+      level: result.success ? "info" : "error",
+      action: result.success ? "ready_email_sent" : "ready_email_failed",
+      module: "email",
       metadata: {
-        orderId: order._id,
-        orderNumber: order.orderNumber,
+        quoteId: quote._id,
+        orderNumber: quote.workOrder.orderNumber,
         clientEmail: client.email,
-        error: result.error
-      }
+        error: result.error,
+      },
     });
 
     return result;

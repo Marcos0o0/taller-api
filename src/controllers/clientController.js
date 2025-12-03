@@ -1,46 +1,47 @@
-const Client = require('../models/Client');
-const Quote = require('../models/Quote');
-const WorkOrder = require('../models/WorkOrder');
-const SystemLog = require('../models/SystemLog');
-const cacheService = require('../services/cacheService');
-const logger = require('../utils/logger');
-const { asyncHandler } = require('../middlewares/errorHandler');
+const Client = require("../models/Client");
+const Quote = require("../models/Quote");
+const SystemLog = require("../models/SystemLog");
+const cacheService = require("../services/cacheService");
+const logger = require("../utils/logger");
+const { asyncHandler } = require("../middlewares/errorHandler");
 
 // @desc    Listar clientes
 // @route   GET /api/clients
 // @access  Admin
 const listClients = asyncHandler(async (req, res) => {
-  const { 
-    page = 1, 
-    limit = 20, 
-    search, 
-    sort = '-createdAt',
-    includeDeleted = false 
+  const {
+    page = 1,
+    limit = 20,
+    search,
+    sort = "-createdAt",
+    includeDeleted = false,
   } = req.query;
 
   // Construir clave de caché
-  const cacheKey = `cache:clients:list:${page}:${limit}:${search || 'all'}:${sort}:${includeDeleted}`;
-  
+  const cacheKey = `cache:clients:list:${page}:${limit}:${
+    search || "all"
+  }:${sort}:${includeDeleted}`;
+
   // Intentar obtener desde caché
   const cached = await cacheService.get(cacheKey);
   if (cached) {
-    logger.debug('Clientes obtenidos desde caché', {
-      module: 'clients',
-      action: 'list_from_cache',
-      userId: req.userId
+    logger.debug("Clientes obtenidos desde caché", {
+      module: "clients",
+      action: "list_from_cache",
+      userId: req.userId,
     });
     return res.json({
       success: true,
       data: cached,
-      cached: true
+      cached: true,
     });
   }
 
   // Construir query
   const query = {};
-  
+
   // Solo admin puede ver eliminados
-  if (req.user.role === 'admin' && includeDeleted === 'true') {
+  if (req.user.role === "admin" && includeDeleted === "true") {
     // Mostrar todos
   } else {
     query.isDeleted = false;
@@ -49,10 +50,10 @@ const listClients = asyncHandler(async (req, res) => {
   // Búsqueda por nombre, apellido o email
   if (search) {
     query.$or = [
-      { firstName: { $regex: search, $options: 'i' } },
-      { lastName1: { $regex: search, $options: 'i' } },
-      { lastName2: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } }
+      { firstName: { $regex: search, $options: "i" } },
+      { lastName1: { $regex: search, $options: "i" } },
+      { lastName2: { $regex: search, $options: "i" } },
+      { email: { $regex: search, $options: "i" } },
     ];
   }
 
@@ -60,12 +61,8 @@ const listClients = asyncHandler(async (req, res) => {
 
   // Ejecutar queries en paralelo
   const [clients, total] = await Promise.all([
-    Client.find(query)
-      .sort(sort)
-      .limit(parseInt(limit))
-      .skip(skip)
-      .lean(),
-    Client.countDocuments(query)
+    Client.find(query).sort(sort).limit(parseInt(limit)).skip(skip).lean(),
+    Client.countDocuments(query),
   ]);
 
   const result = {
@@ -74,23 +71,23 @@ const listClients = asyncHandler(async (req, res) => {
       page: parseInt(page),
       limit: parseInt(limit),
       total,
-      pages: Math.ceil(total / parseInt(limit))
-    }
+      pages: Math.ceil(total / parseInt(limit)),
+    },
   };
 
   // Guardar en caché por 10 minutos
   await cacheService.set(cacheKey, result, 600);
 
-  logger.info('Clientes listados exitosamente', {
-    module: 'clients',
-    action: 'list_success',
+  logger.info("Clientes listados exitosamente", {
+    module: "clients",
+    action: "list_success",
     userId: req.userId,
-    metadata: { count: clients.length, total }
+    metadata: { count: clients.length, total },
   });
 
   res.json({
     success: true,
-    data: result
+    data: result,
   });
 });
 
@@ -103,12 +100,12 @@ const getClient = asyncHandler(async (req, res) => {
   // Intentar desde caché
   const cacheKey = `cache:client:${id}`;
   const cached = await cacheService.get(cacheKey);
-  
+
   if (cached) {
     return res.json({
       success: true,
       data: cached,
-      cached: true
+      cached: true,
     });
   }
 
@@ -119,9 +116,9 @@ const getClient = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'CLIENT_NOT_FOUND',
-        message: 'Cliente no encontrado'
-      }
+        code: "CLIENT_NOT_FOUND",
+        message: "Cliente no encontrado",
+      },
     });
   }
 
@@ -130,7 +127,7 @@ const getClient = asyncHandler(async (req, res) => {
 
   const result = {
     client,
-    stats
+    stats,
   };
 
   // Guardar en caché
@@ -138,7 +135,7 @@ const getClient = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: result
+    data: result,
   });
 });
 
@@ -150,14 +147,14 @@ const createClient = asyncHandler(async (req, res) => {
 
   // Verificar si el email ya existe
   const existingClient = await Client.findOne({ email, isDeleted: false });
-  
+
   if (existingClient) {
     return res.status(409).json({
       success: false,
       error: {
-        code: 'EMAIL_EXISTS',
-        message: 'Ya existe un cliente con ese correo electrónico'
-      }
+        code: "EMAIL_EXISTS",
+        message: "Ya existe un cliente con ese correo electrónico",
+      },
     });
   }
 
@@ -167,29 +164,29 @@ const createClient = asyncHandler(async (req, res) => {
     lastName1,
     lastName2,
     phone,
-    email
+    email,
   });
 
   // Log
   await SystemLog.createLog({
-    level: 'info',
-    action: 'client_created',
+    level: "info",
+    action: "client_created",
     userId: req.userId,
-    module: 'clients',
+    module: "clients",
     metadata: {
       clientId: client._id,
-      clientEmail: client.email
+      clientEmail: client.email,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
-  logger.info('Cliente creado exitosamente', {
-    module: 'clients',
-    action: 'create_success',
+  logger.info("Cliente creado exitosamente", {
+    module: "clients",
+    action: "create_success",
     userId: req.userId,
-    metadata: { clientId: client._id }
+    metadata: { clientId: client._id },
   });
 
   // Invalidar caché
@@ -198,7 +195,7 @@ const createClient = asyncHandler(async (req, res) => {
   res.status(201).json({
     success: true,
     data: { client },
-    message: 'Cliente creado exitosamente'
+    message: "Cliente creado exitosamente",
   });
 });
 
@@ -216,9 +213,9 @@ const updateClient = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'CLIENT_NOT_FOUND',
-        message: 'Cliente no encontrado'
-      }
+        code: "CLIENT_NOT_FOUND",
+        message: "Cliente no encontrado",
+      },
     });
   }
 
@@ -226,27 +223,27 @@ const updateClient = asyncHandler(async (req, res) => {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'CLIENT_DELETED',
-        message: 'No se puede actualizar un cliente eliminado'
-      }
+        code: "CLIENT_DELETED",
+        message: "No se puede actualizar un cliente eliminado",
+      },
     });
   }
 
   // Si cambió el email, verificar que no exista
   if (email && email !== client.email) {
-    const emailExists = await Client.findOne({ 
-      email, 
+    const emailExists = await Client.findOne({
+      email,
       _id: { $ne: id },
-      isDeleted: false 
+      isDeleted: false,
     });
-    
+
     if (emailExists) {
       return res.status(409).json({
         success: false,
         error: {
-          code: 'EMAIL_EXISTS',
-          message: 'Ya existe otro cliente con ese correo electrónico'
-        }
+          code: "EMAIL_EXISTS",
+          message: "Ya existe otro cliente con ese correo electrónico",
+        },
       });
     }
   }
@@ -262,24 +259,24 @@ const updateClient = asyncHandler(async (req, res) => {
 
   // Log
   await SystemLog.createLog({
-    level: 'info',
-    action: 'client_updated',
+    level: "info",
+    action: "client_updated",
     userId: req.userId,
-    module: 'clients',
+    module: "clients",
     metadata: {
       clientId: client._id,
-      changes: req.body
+      changes: req.body,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
-  logger.info('Cliente actualizado exitosamente', {
-    module: 'clients',
-    action: 'update_success',
+  logger.info("Cliente actualizado exitosamente", {
+    module: "clients",
+    action: "update_success",
     userId: req.userId,
-    metadata: { clientId: client._id }
+    metadata: { clientId: client._id },
   });
 
   // Invalidar caché
@@ -289,7 +286,7 @@ const updateClient = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: { client },
-    message: 'Cliente actualizado exitosamente'
+    message: "Cliente actualizado exitosamente",
   });
 });
 
@@ -306,9 +303,9 @@ const deleteClient = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'CLIENT_NOT_FOUND',
-        message: 'Cliente no encontrado'
-      }
+        code: "CLIENT_NOT_FOUND",
+        message: "Cliente no encontrado",
+      },
     });
   }
 
@@ -316,22 +313,22 @@ const deleteClient = asyncHandler(async (req, res) => {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'CLIENT_ALREADY_DELETED',
-        message: 'El cliente ya está eliminado'
-      }
+        code: "CLIENT_ALREADY_DELETED",
+        message: "El cliente ya está eliminado",
+      },
     });
   }
 
   // Verificar si se puede eliminar
   const canDeleteResult = await client.canDelete();
-  
+
   if (!canDeleteResult.canDelete) {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'CANNOT_DELETE_CLIENT',
-        message: canDeleteResult.reason
-      }
+        code: "CANNOT_DELETE_CLIENT",
+        message: canDeleteResult.reason,
+      },
     });
   }
 
@@ -340,24 +337,24 @@ const deleteClient = asyncHandler(async (req, res) => {
 
   // Log
   await SystemLog.createLog({
-    level: 'info',
-    action: 'client_deleted',
+    level: "info",
+    action: "client_deleted",
     userId: req.userId,
-    module: 'clients',
+    module: "clients",
     metadata: {
       clientId: client._id,
-      clientEmail: client.email
+      clientEmail: client.email,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
-  logger.info('Cliente eliminado exitosamente', {
-    module: 'clients',
-    action: 'delete_success',
+  logger.info("Cliente eliminado exitosamente", {
+    module: "clients",
+    action: "delete_success",
     userId: req.userId,
-    metadata: { clientId: client._id }
+    metadata: { clientId: client._id },
   });
 
   // Invalidar caché
@@ -366,7 +363,7 @@ const deleteClient = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    message: 'Cliente eliminado exitosamente'
+    message: "Cliente eliminado exitosamente",
   });
 });
 
@@ -375,7 +372,7 @@ const deleteClient = asyncHandler(async (req, res) => {
 // @access  Admin
 const getClientHistory = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { type = 'all', status, startDate, endDate } = req.query;
+  const { type = "all", status, startDate, endDate } = req.query;
 
   // Buscar cliente
   const client = await Client.findById(id);
@@ -384,14 +381,11 @@ const getClientHistory = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'CLIENT_NOT_FOUND',
-        message: 'Cliente no encontrado'
-      }
+        code: "CLIENT_NOT_FOUND",
+        message: "Cliente no encontrado",
+      },
     });
   }
-
-  let quotes = [];
-  let orders = [];
 
   // Construir filtros
   const quoteQuery = { clientId: id, isDeleted: false };
@@ -402,34 +396,40 @@ const getClientHistory = asyncHandler(async (req, res) => {
     if (endDate) quoteQuery.createdAt.$lte = new Date(endDate);
   }
 
-  // Obtener presupuestos si es necesario
-  if (type === 'all' || type === 'quotes') {
-    quotes = await Quote.find(quoteQuery)
-      .sort('-createdAt')
-      .lean();
+  let quotes = [];
+  let orders = [];
+
+  // Obtener presupuestos
+  if (type === "all" || type === "quotes") {
+    quotes = await Quote.find(quoteQuery).sort("-createdAt").lean();
   }
 
-  // Obtener órdenes si es necesario
-  if (type === 'all' || type === 'orders') {
-    const quoteIds = quotes.length > 0 
-      ? quotes.map(q => q._id) 
-      : (await Quote.find({ clientId: id }).select('_id')).map(q => q._id);
-    
-    const orderQuery = { 
-      quoteId: { $in: quoteIds },
-      isDeleted: false 
+  // Obtener órdenes (presupuestos con workOrder)
+  if (type === "all" || type === "orders") {
+    const orderQuery = {
+      clientId: id,
+      isDeleted: false,
+      workOrder: { $exists: true, $ne: null },
     };
-    
-    if (status) orderQuery.status = status;
+
+    if (status) orderQuery["workOrder.status"] = status;
     if (startDate || endDate) {
-      orderQuery.createdAt = {};
-      if (startDate) orderQuery.createdAt.$gte = new Date(startDate);
-      if (endDate) orderQuery.createdAt.$lte = new Date(endDate);
+      orderQuery["workOrder.createdAt"] = {};
+      if (startDate)
+        orderQuery["workOrder.createdAt"].$gte = new Date(startDate);
+      if (endDate) orderQuery["workOrder.createdAt"].$lte = new Date(endDate);
     }
 
-    orders = await WorkOrder.find(orderQuery)
-      .sort('-createdAt')
+    const quotesWithOrders = await Quote.find(orderQuery)
+      .populate("workOrder.mechanicId")
+      .sort("-workOrder.createdAt")
       .lean();
+
+    orders = quotesWithOrders.map((q) => ({
+      quoteNumber: q.quoteNumber,
+      vehicle: q.vehicle,
+      ...q.workOrder,
+    }));
   }
 
   // Obtener estadísticas
@@ -441,8 +441,8 @@ const getClientHistory = asyncHandler(async (req, res) => {
       client,
       quotes,
       orders,
-      summary: stats
-    }
+      summary: stats,
+    },
   });
 });
 
@@ -452,5 +452,5 @@ module.exports = {
   createClient,
   updateClient,
   deleteClient,
-  getClientHistory
+  getClientHistory,
 };

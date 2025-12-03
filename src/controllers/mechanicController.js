@@ -1,9 +1,10 @@
-const Mechanic = require('../models/Mechanic');
-const User = require('../models/User');
-const SystemLog = require('../models/SystemLog');
-const cacheService = require('../services/cacheService');
-const logger = require('../utils/logger');
-const { asyncHandler } = require('../middlewares/errorHandler');
+const Mechanic = require("../models/Mechanic");
+const User = require("../models/User");
+const Quote = require("../models/Quote");
+const SystemLog = require("../models/SystemLog");
+const cacheService = require("../services/cacheService");
+const logger = require("../utils/logger");
+const { asyncHandler } = require("../middlewares/errorHandler");
 
 // @desc    Listar mecánicos
 // @route   GET /api/mechanics
@@ -12,18 +13,18 @@ const listMechanics = asyncHandler(async (req, res) => {
   const { isActive, includeDeleted = false } = req.query;
 
   const query = {};
-  
+
   if (isActive !== undefined) {
-    query.isActive = isActive === 'true';
+    query.isActive = isActive === "true";
   }
 
-  if (includeDeleted !== 'true') {
+  if (includeDeleted !== "true") {
     query.isDeleted = false;
   }
 
   const mechanics = await Mechanic.find(query)
-    .populate('userId', 'username role')
-    .sort('-createdAt')
+    .populate("userId", "username role")
+    .sort("-createdAt")
     .lean();
 
   // Obtener estadísticas de cada mecánico
@@ -37,7 +38,7 @@ const listMechanics = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: { mechanics: mechanicsWithStats }
+    data: { mechanics: mechanicsWithStats },
   });
 });
 
@@ -47,16 +48,18 @@ const listMechanics = asyncHandler(async (req, res) => {
 const getMechanic = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const mechanic = await Mechanic.findById(id)
-    .populate('userId', 'username role');
+  const mechanic = await Mechanic.findById(id).populate(
+    "userId",
+    "username role"
+  );
 
   if (!mechanic) {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'MECHANIC_NOT_FOUND',
-        message: 'Mecánico no encontrado'
-      }
+        code: "MECHANIC_NOT_FOUND",
+        message: "Mecánico no encontrado",
+      },
     });
   }
 
@@ -66,8 +69,8 @@ const getMechanic = asyncHandler(async (req, res) => {
     success: true,
     data: {
       mechanic,
-      stats
-    }
+      stats,
+    },
   });
 });
 
@@ -84,19 +87,19 @@ const createMechanic = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'USER_NOT_FOUND',
-        message: 'Usuario no encontrado'
-      }
+        code: "USER_NOT_FOUND",
+        message: "Usuario no encontrado",
+      },
     });
   }
 
-  if (user.role !== 'mechanic') {
+  if (user.role !== "mechanic") {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'USER_NOT_MECHANIC',
-        message: 'El usuario debe tener rol de mecánico'
-      }
+        code: "USER_NOT_MECHANIC",
+        message: "El usuario debe tener rol de mecánico",
+      },
     });
   }
 
@@ -107,9 +110,9 @@ const createMechanic = asyncHandler(async (req, res) => {
     return res.status(409).json({
       success: false,
       error: {
-        code: 'MECHANIC_EXISTS',
-        message: 'Ya existe un perfil de mecánico para este usuario'
-      }
+        code: "MECHANIC_EXISTS",
+        message: "Ya existe un perfil de mecánico para este usuario",
+      },
     });
   }
 
@@ -119,29 +122,29 @@ const createMechanic = asyncHandler(async (req, res) => {
     firstName,
     lastName1,
     lastName2,
-    phone
+    phone,
   });
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'mechanic_created',
+    level: "info",
+    action: "mechanic_created",
     userId: req.userId,
-    module: 'mechanics',
+    module: "mechanics",
     metadata: {
       mechanicId: mechanic._id,
       mechanicName: mechanic.getFullName(),
-      linkedUserId: userId
+      linkedUserId: userId,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
-  logger.info('Mecánico creado', {
-    module: 'mechanics',
-    action: 'create_success',
+  logger.info("Mecánico creado", {
+    module: "mechanics",
+    action: "create_success",
     userId: req.userId,
-    metadata: { mechanicId: mechanic._id }
+    metadata: { mechanicId: mechanic._id },
   });
 
   await cacheService.invalidateMechanics();
@@ -149,7 +152,7 @@ const createMechanic = asyncHandler(async (req, res) => {
   res.status(201).json({
     success: true,
     data: { mechanic },
-    message: 'Mecánico creado exitosamente'
+    message: "Mecánico creado exitosamente",
   });
 });
 
@@ -166,9 +169,9 @@ const updateMechanic = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'MECHANIC_NOT_FOUND',
-        message: 'Mecánico no encontrado'
-      }
+        code: "MECHANIC_NOT_FOUND",
+        message: "Mecánico no encontrado",
+      },
     });
   }
 
@@ -176,9 +179,9 @@ const updateMechanic = asyncHandler(async (req, res) => {
     return res.status(400).json({
       success: false,
       error: {
-        code: 'MECHANIC_DELETED',
-        message: 'No se puede actualizar un mecánico eliminado'
-      }
+        code: "MECHANIC_DELETED",
+        message: "No se puede actualizar un mecánico eliminado",
+      },
     });
   }
 
@@ -192,17 +195,17 @@ const updateMechanic = asyncHandler(async (req, res) => {
   await mechanic.save();
 
   await SystemLog.createLog({
-    level: 'info',
-    action: 'mechanic_updated',
+    level: "info",
+    action: "mechanic_updated",
     userId: req.userId,
-    module: 'mechanics',
+    module: "mechanics",
     metadata: {
       mechanicId: mechanic._id,
-      changes: req.body
+      changes: req.body,
     },
     ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
+    userAgent: req.get("user-agent"),
+    requestId: req.id,
   });
 
   await cacheService.invalidateMechanics();
@@ -210,7 +213,7 @@ const updateMechanic = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: { mechanic },
-    message: 'Mecánico actualizado exitosamente'
+    message: "Mecánico actualizado exitosamente",
   });
 });
 
@@ -227,35 +230,39 @@ const getMechanicOrders = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       error: {
-        code: 'MECHANIC_NOT_FOUND',
-        message: 'Mecánico no encontrado'
-      }
+        code: "MECHANIC_NOT_FOUND",
+        message: "Mecánico no encontrado",
+      },
     });
   }
 
-  const WorkOrder = require('../models/WorkOrder');
-
   const query = {
-    mechanicId: id,
-    isDeleted: false
+    "workOrder.mechanicId": id,
+    isDeleted: false,
   };
 
-  if (status) query.status = status;
+  if (status) query["workOrder.status"] = status;
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
 
-  const [orders, total] = await Promise.all([
-    WorkOrder.find(query)
-      .populate({
-        path: 'quoteId',
-        populate: { path: 'clientId', select: 'firstName lastName1 lastName2 email phone' }
-      })
-      .sort('-createdAt')
+  const [quotes, total] = await Promise.all([
+    Quote.find(query)
+      .populate("clientId", "firstName lastName1 lastName2 email phone")
+      .sort("-workOrder.updatedAt")
       .limit(parseInt(limit))
       .skip(skip)
       .lean(),
-    WorkOrder.countDocuments(query)
+    Quote.countDocuments(query),
   ]);
+
+  // Transformar para devolver formato de orden
+  const orders = quotes.map((q) => ({
+    _id: q._id,
+    quoteNumber: q.quoteNumber,
+    client: q.clientId,
+    vehicle: q.vehicle,
+    order: q.workOrder,
+  }));
 
   res.json({
     success: true,
@@ -266,9 +273,9 @@ const getMechanicOrders = asyncHandler(async (req, res) => {
         page: parseInt(page),
         limit: parseInt(limit),
         total,
-        pages: Math.ceil(total / parseInt(limit))
-      }
-    }
+        pages: Math.ceil(total / parseInt(limit)),
+      },
+    },
   });
 });
 
@@ -277,5 +284,5 @@ module.exports = {
   getMechanic,
   createMechanic,
   updateMechanic,
-  getMechanicOrders
+  getMechanicOrders,
 };
