@@ -80,19 +80,23 @@ const getMechanic = asyncHandler(async (req, res) => {
 const createMechanic = asyncHandler(async (req, res) => {
   const { userId, firstName, lastName1, lastName2, phone } = req.body;
 
-  // Verificar que el usuario existe y es mecánico
-  const user = await User.findById(userId);
+  // Verificar que el usuario existe y no está eliminado
+  const user = await User.findOne({
+    _id: userId,
+    isDeleted: false
+  });
 
-  if (!user || user.isDeleted) {
+  if (!user) {
     return res.status(404).json({
       success: false,
       error: {
         code: "USER_NOT_FOUND",
-        message: "Usuario no encontrado",
+        message: "Usuario no encontrado o eliminado",
       },
     });
   }
 
+  // Verificar que el usuario tiene rol de mecánico
   if (user.role !== "mechanic") {
     return res.status(400).json({
       success: false,
@@ -104,7 +108,10 @@ const createMechanic = asyncHandler(async (req, res) => {
   }
 
   // Verificar que no exista otro mecánico con ese userId
-  const existingMechanic = await Mechanic.findOne({ userId, isDeleted: false });
+  const existingMechanic = await Mechanic.findOne({ 
+    userId,
+    isDeleted: false 
+  });
 
   if (existingMechanic) {
     return res.status(409).json({
@@ -116,13 +123,29 @@ const createMechanic = asyncHandler(async (req, res) => {
     });
   }
 
-  // Crear mecánico
+  // Verificar que el teléfono no esté en uso
+  const existingPhone = await Mechanic.findOne({
+    phone: phone.trim(),
+    isDeleted: false
+  });
+
+  if (existingPhone) {
+    return res.status(409).json({
+      success: false,
+      error: {
+        code: "PHONE_EXISTS",
+        message: "Ya existe un mecánico con ese número de teléfono",
+      },
+    });
+  }
+
+  // Crear mecánico con datos normalizados
   const mechanic = await Mechanic.create({
     userId,
-    firstName,
-    lastName1,
-    lastName2,
-    phone,
+    firstName: firstName.trim(),
+    lastName1: lastName1.trim(),
+    lastName2: lastName2?.trim(),
+    phone: phone.trim(),
   });
 
   await SystemLog.createLog({

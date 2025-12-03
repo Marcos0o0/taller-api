@@ -236,6 +236,28 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     });
   }
 
+  // Validar que el mecánico existe si se está cambiando a en_progreso
+  if (status === 'en_progreso' && !quote.workOrder.mechanicId) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "NO_MECHANIC_ASSIGNED",
+        message: "Debe asignar un mecánico antes de iniciar el trabajo",
+      },
+    });
+  }
+
+  // Validar que tenga costo final si se está entregando
+  if (status === 'entregado' && !quote.workOrder.finalCost) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "NO_FINAL_COST",
+        message: "Debe establecer el costo final antes de entregar",
+      },
+    });
+  }
+
   // Si es mecánico, verificar que sea su orden
   if (req.user.role === "mechanic") {
     const mechanic = await Mechanic.findOne({ userId: req.userId });
