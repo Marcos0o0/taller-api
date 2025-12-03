@@ -114,29 +114,80 @@ const getQuote = asyncHandler(async (req, res) => {
 // @route   POST /api/quotes
 // @access  Admin
 const createQuote = asyncHandler(async (req, res) => {
-  const { clientId, vehicle, description, proposedWork, estimatedCost, notes } =
-    req.body;
+  const { clientId, vehicle, description, proposedWork, estimatedCost, notes } = req.body;
 
-  // Verificar que el cliente existe
-  const client = await Client.findById(clientId);
-  if (!client || client.isDeleted) {
+  // Verificar que el cliente existe y no está eliminado
+  const client = await Client.findOne({
+    _id: clientId,
+    isDeleted: false
+  });
+
+  if (!client) {
     return res.status(404).json({
       success: false,
       error: {
         code: "CLIENT_NOT_FOUND",
-        message: "Cliente no encontrado",
+        message: "Cliente no encontrado o eliminado",
       },
     });
   }
 
-  // Crear presupuesto
+  // Normalizar patente
+  const normalizedPlate = vehicle.licensePlate.toUpperCase().replace(/[\s-]/g, '');
+
+  // Verificar si ya existe un presupuesto pendiente para este vehículo
+  const existingQuote = await Quote.checkDuplicatePending(clientId, normalizedPlate);
+  
+  if (existingQuote) {
+    return res.status(409).json({
+      success: false,
+      error: {
+        code: "DUPLICATE_PENDING_QUOTE",
+        message: `Ya existe un presupuesto pendiente (${existingQuote.quoteNumber}) para este vehículo`,
+        existingQuote: {
+          quoteNumber: existingQuote.quoteNumber,
+          validUntil: existingQuote.validUntil
+        }
+      },
+    });
+  }
+
+  // Validar año del vehículo
+  const currentYear = new Date().getFullYear();
+  if (vehicle.year < 1950 || vehicle.year > currentYear + 1) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "INVALID_VEHICLE_YEAR",
+        message: `El año del vehículo debe estar entre 1950 y ${currentYear + 1}`,
+      },
+    });
+  }
+
+  // Validar costo estimado
+  if (estimatedCost < 0) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "INVALID_COST",
+        message: "El costo estimado debe ser mayor o igual a 0",
+      },
+    });
+  }
+
+  // Crear presupuesto con datos normalizados
   const quote = await Quote.create({
     clientId,
-    vehicle,
-    description,
-    proposedWork,
+    vehicle: {
+      ...vehicle,
+      licensePlate: normalizedPlate,
+      brand: vehicle.brand.trim(),
+      model: vehicle.model.trim()
+    },
+    description: description.trim(),
+    proposedWork: proposedWork.trim(),
     estimatedCost,
-    notes,
+    notes: notes?.trim(),
   });
 
   // Log

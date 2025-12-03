@@ -22,8 +22,15 @@ const clientSchema = new mongoose.Schema(
     phone: {
       type: String,
       required: [true, "Teléfono es obligatorio"],
+      trim: true,
       minlength: [9, "Teléfono debe tener al menos 9 caracteres"],
       maxlength: [20, "Teléfono no puede exceder 20 caracteres"],
+      validate: {
+        validator: function(v) {
+          return /^[+]?[\d\s-()]+$/.test(v);
+        },
+        message: "Teléfono debe contener solo números, espacios, guiones y paréntesis"
+      }
     },
     email: {
       type: String,
@@ -56,6 +63,34 @@ const clientSchema = new mongoose.Schema(
 clientSchema.index({ email: 1 });
 clientSchema.index({ firstName: 1, lastName1: 1 });
 clientSchema.index({ isDeleted: 1, createdAt: -1 });
+clientSchema.index({ phone: 1 });
+
+// Índice único compuesto para email solo cuando no está eliminado
+clientSchema.index(
+  { email: 1, isDeleted: 1 },
+  { 
+    unique: true,
+    partialFilterExpression: { isDeleted: false }
+  }
+);
+
+// Validación personalizada para email único considerando soft delete
+clientSchema.pre('save', async function(next) {
+  if (this.isModified('email') && !this.isDeleted) {
+    const existingClient = await mongoose.model('Client').findOne({
+      email: this.email,
+      isDeleted: false,
+      _id: { $ne: this._id }
+    });
+    
+    if (existingClient) {
+      const error = new Error('Ya existe un cliente con ese email');
+      error.name = 'ValidationError';
+      return next(error);
+    }
+  }
+  next();
+});
 
 // Método para obtener nombre completo
 clientSchema.methods.getFullName = function () {
