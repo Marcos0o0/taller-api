@@ -14,14 +14,14 @@ const startServer = async () => {
   try {
     // Conectar a MongoDB
     await connectDB();
-    logger.info('✓ MongoDB conectado');
+    logger.info('MongoDB conectado');
 
     // Conectar a Redis (no crítico si falla)
     try {
       await connectRedis();
-      logger.info('✓ Redis conectado');
+      logger.info('Redis conectado');
     } catch (error) {
-      logger.warn('⚠ Redis no disponible. El sistema funcionará sin caché', {
+      logger.warn('Redis no disponible. El sistema funcionará sin caché', {
         module: 'server',
         action: 'redis_connection_warning',
         metadata: { error: error.message }
@@ -31,9 +31,9 @@ const startServer = async () => {
     // Inicializar servicio de email
     try {
       await emailService.initialize();
-      logger.info('✓ Servicio de email inicializado');
+      logger.info('Servicio de email inicializado');
     } catch (error) {
-      logger.warn('⚠ Servicio de email no disponible', {
+      logger.warn('Servicio de email no disponible', {
         module: 'server',
         action: 'email_init_warning',
         metadata: { error: error.message }
@@ -42,7 +42,7 @@ const startServer = async () => {
 
     // Iniciar servidor
     server = app.listen(PORT, () => {
-      logger.info(`🚀 Servidor corriendo en puerto ${PORT}`, {
+      logger.info(`Servidor corriendo en puerto ${PORT}`, {
         module: 'server',
         action: 'start',
         metadata: {

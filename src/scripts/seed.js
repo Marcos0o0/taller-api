@@ -277,12 +277,6 @@ const seedData = async () => {
     console.log("  • 1 Rechazado\n");
 
     console.log("API disponible en: http://localhost:3001");
-    console.log("Usa Postman para probar los endpoints\n");
-
-    console.log("NOTAS:");
-    console.log("   • WorkOrder ahora es SUBDOCUMENTO de Quote");
-    console.log('   • No existe colección "workorders" separada');
-    console.log("   • Cada Quote.workOrder contiene la orden completa\n");
 
     process.exit(0);
   } catch (error) {
