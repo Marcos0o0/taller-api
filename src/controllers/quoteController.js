@@ -1,0 +1,645 @@
+const Quote = require("../models/Quote");
+const Client = require("../models/Client");
+const Mechanic = require("../models/Mechanic");
+const emailService = require("../services/emailService");
+const cacheService = require("../services/cacheService");
+const { asyncHandler } = require("../middlewares/errorHandler");
+
+// @desc    Listar presupuestos
+// @route   GET /api/quotes
+// @access  Admin
+const listQuotes = asyncHandler(async (req, res) => {
+  const {
+    page = 1,
+    limit = 20,
+    status,
+    clientId,
+    startDate,
+    endDate,
+    search,
+    sort = "-createdAt",
+  } = req.query;
+
+  // Construir clave de caché
+  const cacheKey = `cache:quotes:list:${page}:${limit}:${status || "all"}:${
+    clientId || "all"
+  }:${search || "all"}`;
+
+  const cached = await cacheService.get(cacheKey);
+  if (cached) {
+    return res.json({ success: true, data: cached, cached: true });
+  }
+
+  // Construir query
+  const query = { isDeleted: false };
+
+  if (status) query.status = status;
+  if (clientId) query.clientId = clientId;
+
+  if (startDate || endDate) {
+    query.createdAt = {};
+    if (startDate) query.createdAt.$gte = new Date(startDate);
+    if (endDate) query.createdAt.$lte = new Date(endDate);
+  }
+
+  if (search) {
+    query.$or = [
+      { quoteNumber: { $regex: search, $options: "i" } },
+      { "vehicle.licensePlate": { $regex: search, $options: "i" } },
+    ];
+  }
+
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+
+  const [quotes, total] = await Promise.all([
+    Quote.find(query)
+      .populate("clientId", "firstName lastName1 lastName2 email phone")
+      .populate("workOrder.mechanicId")
+      .sort(sort)
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean(),
+    Quote.countDocuments(query),
+  ]);
+
+  const result = {
+    quotes,
+    pagination: {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total,
+      pages: Math.ceil(total / parseInt(limit)),
+    },
+  };
+
+  await cacheService.set(cacheKey, result, 180);
+
+  res.json({ success: true, data: result });
+});
+
+// @desc    Obtener presupuesto por ID
+// @route   GET /api/quotes/:id
+// @access  Admin
+const getQuote = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const cacheKey = `cache:quote:${id}`;
+  const cached = await cacheService.get(cacheKey);
+  if (cached) {
+    return res.json({ success: true, data: cached, cached: true });
+  }
+
+  const quote = await Quote.findById(id)
+    .populate("clientId")
+    .populate("workOrder.mechanicId");
+
+  if (!quote) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: "QUOTE_NOT_FOUND",
+        message: "Presupuesto no encontrado",
+      },
+    });
+  }
+
+  await cacheService.set(cacheKey, { quote }, 180);
+
+  res.json({ success: true, data: { quote } });
+});
+
+// @desc    Crear presupuesto
+// @route   POST /api/quotes
+// @access  Admin
+const createQuote = asyncHandler(async (req, res) => {
+  const { clientId, vehicle, description, proposedWork, estimatedCost, notes, includeIVA } = req.body;
+
+  // Verificar que el cliente existe y no está eliminado
+  const client = await Client.findOne({
+    _id: clientId,
+    isDeleted: false
+  });
+
+  if (!client) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: "CLIENT_NOT_FOUND",
+        message: "Cliente no encontrado o eliminado",
+      },
+    });
+  }
+
+  // Normalizar patente
+  const normalizedPlate = vehicle.licensePlate.toUpperCase().replace(/[\s-]/g, '');
+
+  // Verificar si ya existe un presupuesto pendiente para este vehículo
+  const existingQuote = await Quote.checkDuplicatePending(clientId, normalizedPlate);
+  
+  if (existingQuote) {
+    return res.status(409).json({
+      success: false,
+      error: {
+        code: "DUPLICATE_PENDING_QUOTE",
+        message: `Ya existe un presupuesto pendiente (${existingQuote.quoteNumber}) para este vehículo`,
+        existingQuote: {
+          quoteNumber: existingQuote.quoteNumber,
+          validUntil: existingQuote.validUntil
+        }
+      },
+    });
+  }
+
+  // Validar año del vehículo
+  const currentYear = new Date().getFullYear();
+  if (vehicle.year < 1950 || vehicle.year > currentYear + 1) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "INVALID_VEHICLE_YEAR",
+        message: `El año del vehículo debe estar entre 1950 y ${currentYear + 1}`,
+      },
+    });
+  }
+
+  // Validar costo estimado
+  if (estimatedCost < 0) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "INVALID_COST",
+        message: "El costo estimado debe ser mayor o igual a 0",
+      },
+    });
+  }
+
+  // Crear presupuesto con datos normalizados
+  const quote = await Quote.create({
+    clientId,
+    vehicle: {
+      ...vehicle,
+      licensePlate: normalizedPlate,
+      brand: vehicle.brand.trim(),
+      model: vehicle.model.trim()
+    },
+    description: description.trim(),
+    proposedWork: proposedWork.trim(),
+    estimatedCost,
+    notes: notes?.trim(),
+    includeIVA: includeIVA !== undefined ? includeIVA : true,
+  });
+
+  console.log(`Presupuesto creado: ${quote.quoteNumber} - Cliente: ${clientId} - Costo: ${estimatedCost}`);
+
+  await cacheService.invalidateQuotes();
+
+  res.status(201).json({
+    success: true,
+    data: { quote },
+    message: "Presupuesto creado exitosamente",
+  });
+});
+
+// @desc    Actualizar presupuesto
+// @route   PUT /api/quotes/:id
+// @access  Admin
+const updateQuote = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { description, proposedWork, estimatedCost, notes, includeIVA } = req.body;
+
+  const quote = await Quote.findById(id);
+
+  if (!quote) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: "QUOTE_NOT_FOUND",
+        message: "Presupuesto no encontrado",
+      },
+    });
+  }
+
+  if (!quote.canEdit()) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "QUOTE_CANNOT_EDIT",
+        message:
+          "Solo se pueden editar presupuestos en estado pendiente sin orden de trabajo",
+      },
+    });
+  }
+
+  if (description) quote.description = description;
+  if (proposedWork) quote.proposedWork = proposedWork;
+  if (estimatedCost !== undefined) quote.estimatedCost = estimatedCost;
+  if (notes !== undefined) quote.notes = notes;
+  if (includeIVA !== undefined) quote.includeIVA = includeIVA;
+  
+  await quote.save();
+
+  console.log(`Presupuesto actualizado: ${quote.quoteNumber} por usuario ID: ${req.userId}`);
+
+  await cacheService.invalidateQuotes();
+  await cacheService.delete(`cache:quote:${id}`);
+
+  res.json({
+    success: true,
+    data: { quote },
+    message: "Presupuesto actualizado exitosamente",
+  });
+});
+
+// @desc    Enviar presupuesto por email
+// @route   POST /api/quotes/:id/send-email
+// @access  Admin
+const sendQuoteEmail = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const quote = await Quote.findById(id);
+
+  if (!quote) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: "QUOTE_NOT_FOUND",
+        message: "Presupuesto no encontrado",
+      },
+    });
+  }
+
+  if (quote.status !== "pending") {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "QUOTE_ALREADY_PROCESSED",
+        message: "El presupuesto ya fue procesado",
+      },
+    });
+  }
+
+  const client = await Client.findById(quote.clientId);
+
+  if (!client || !client.email) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "CLIENT_NO_EMAIL",
+        message: "El cliente no tiene un email válido",
+      },
+    });
+  }
+
+  // Generar tokens
+  const tokens = quote.generateTokens();
+  await quote.save();
+
+  // Enviar email
+  const result = await emailService.sendQuoteEmail(quote, client, tokens);
+
+  if (!result.success) {
+    quote.emailAttempts += 1;
+    await quote.save();
+
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: "EMAIL_SEND_FAILED",
+        message: "Error al enviar el correo electrónico",
+        details: result.error,
+      },
+    });
+  }
+
+  quote.emailSent = true;
+  quote.emailSentAt = new Date();
+  quote.emailAttempts += 1;
+  await quote.save();
+
+  console.log(`Email enviado para presupuesto: ${quote.quoteNumber} a ${client.email}`);
+
+  await cacheService.invalidateQuotes();
+
+  res.json({
+    success: true,
+    message: "Presupuesto enviado por correo exitosamente",
+    data: {
+      emailSent: true,
+      emailSentAt: quote.emailSentAt,
+    },
+  });
+});
+
+// @desc    Aprobar presupuesto (público con token)
+// @route   GET /api/quotes/:id/approve?token=xxx
+// @access  Public
+const approveQuote = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { token } = req.query;
+
+  if (!token) {
+    return res.status(400).send(`
+      <!DOCTYPE html>
+      <html><head><title>Error</title></head>
+      <body style="font-family: Arial; text-align: center; padding: 50px;">
+        <h1>❌ Error</h1>
+        <p>Token de aprobación no proporcionado</p>
+      </body></html>
+    `);
+  }
+
+  const quote = await Quote.findById(id).populate("clientId");
+
+  if (!quote) {
+    return res.status(404).send(`
+      <!DOCTYPE html>
+      <html><head><title>Error</title></head>
+      <body style="font-family: Arial; text-align: center; padding: 50px;">
+        <h1>❌ Presupuesto no encontrado</h1>
+      </body></html>
+    `);
+  }
+
+  const validation = quote.validateToken(token);
+
+  if (!validation.valid) {
+    return res.status(400).send(`
+      <!DOCTYPE html>
+      <html><head><title>Error</title></head>
+      <body style="font-family: Arial; text-align: center; padding: 50px;">
+        <h1>❌ ${validation.error}</h1>
+        <p>Por favor, contacta al taller para más información.</p>
+      </body></html>
+    `);
+  }
+
+  // Usar token y aprobar
+  await quote.useToken(token, req.ip, req.get("user-agent"));
+  quote.status = "approved";
+  await quote.save();
+
+  // Crear orden de trabajo automáticamente (como subdocumento)
+  await quote.createWorkOrder();
+
+  console.log(`Presupuesto aprobado por cliente: ${quote.quoteNumber} - Orden: ${quote.workOrder.orderNumber}`);
+
+  await cacheService.invalidateQuotes();
+
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Presupuesto Aprobado</title>
+      <style>
+        body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 50px; text-align: center; }
+        .container { background: white; padding: 40px; border-radius: 10px; max-width: 600px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #27ae60; }
+        .info { background: #d4edda; padding: 20px; border-radius: 5px; margin: 20px 0; }
+        .order-number { font-size: 24px; font-weight: bold; color: #27ae60; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>✅ Presupuesto Aprobado</h1>
+        <p>¡Gracias por aprobar el presupuesto <strong>${quote.quoteNumber}</strong>!</p>
+        <div class="info">
+          <p>Se ha creado automáticamente la orden de trabajo:</p>
+          <p class="order-number">${quote.workOrder.orderNumber}</p>
+        </div>
+        <p>Nuestro equipo comenzará a trabajar en su vehículo pronto.</p>
+        <p>Le notificaremos por correo cuando esté listo.</p>
+        <hr style="margin: 30px 0;">
+        <p style="color: #666; font-size: 14px;">
+          ${process.env.WORKSHOP_NAME}<br>
+          ${process.env.WORKSHOP_PHONE}
+        </p>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// @desc    Rechazar presupuesto (público con token)
+// @route   GET /api/quotes/:id/reject?token=xxx
+// @access  Public
+const rejectQuote = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { token } = req.query;
+
+  if (!token) {
+    return res.status(400).send(`
+      <!DOCTYPE html>
+      <html><head><title>Error</title></head>
+      <body style="font-family: Arial; text-align: center; padding: 50px;">
+        <h1>❌ Error</h1>
+        <p>Token de rechazo no proporcionado</p>
+      </body></html>
+    `);
+  }
+
+  const quote = await Quote.findById(id).populate("clientId");
+
+  if (!quote) {
+    return res.status(404).send(`
+      <!DOCTYPE html>
+      <html><head><title>Error</title></head>
+      <body style="font-family: Arial; text-align: center; padding: 50px;">
+        <h1>❌ Presupuesto no encontrado</h1>
+      </body></html>
+    `);
+  }
+
+  const validation = quote.validateToken(token);
+
+  if (!validation.valid) {
+    return res.status(400).send(`
+      <!DOCTYPE html>
+      <html><head><title>Error</title></head>
+      <body style="font-family: Arial; text-align: center; padding: 50px;">
+        <h1>❌ ${validation.error}</h1>
+      </body></html>
+    `);
+  }
+
+  await quote.useToken(token, req.ip, req.get("user-agent"));
+  quote.status = "rejected";
+  await quote.save();
+
+  console.log(`Presupuesto rechazado por cliente: ${quote.quoteNumber}`);
+
+  await cacheService.invalidateQuotes();
+
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Presupuesto Rechazado</title>
+      <style>
+        body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 50px; text-align: center; }
+        .container { background: white; padding: 40px; border-radius: 10px; max-width: 600px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #e74c3c; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>❌ Presupuesto Rechazado</h1>
+        <p>Has rechazado el presupuesto <strong>${quote.quoteNumber}</strong></p>
+        <p>Gracias por tu respuesta. Si tienes alguna consulta o deseas modificar el presupuesto, no dudes en contactarnos.</p>
+        <hr style="margin: 30px 0;">
+        <p style="color: #666; font-size: 14px;">
+          ${process.env.WORKSHOP_NAME}<br>
+          ${process.env.WORKSHOP_PHONE}<br>
+          ${process.env.WORKSHOP_EMAIL}
+        </p>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// @desc    Aprobar presupuesto manualmente (admin)
+// @route   PUT /api/quotes/:id/approve
+// @access  Admin
+const approveQuoteManual = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const quote = await Quote.findById(id);
+
+  if (!quote) {
+    return res.status(404).json({
+      success: false,
+      error: { code: "QUOTE_NOT_FOUND", message: "Presupuesto no encontrado" },
+    });
+  }
+
+  if (quote.status !== "pending") {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "QUOTE_ALREADY_PROCESSED",
+        message: "El presupuesto ya fue procesado",
+      },
+    });
+  }
+
+  quote.status = "approved";
+  await quote.save();
+
+  // Crear orden automáticamente
+  await quote.createWorkOrder();
+
+  console.log(`Presupuesto aprobado manualmente por admin: ${quote.quoteNumber} - Orden: ${quote.workOrder.orderNumber}`);
+
+  await cacheService.invalidateQuotes();
+
+  res.json({
+    success: true,
+    message: "Presupuesto aprobado y orden creada",
+    data: { quote },
+  });
+});
+
+// @desc    Rechazar presupuesto manualmente (admin)
+// @route   PUT /api/quotes/:id/reject
+// @access  Admin
+const rejectQuoteManual = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const quote = await Quote.findById(id);
+
+  if (!quote) {
+    return res.status(404).json({
+      success: false,
+      error: { code: "QUOTE_NOT_FOUND", message: "Presupuesto no encontrado" },
+    });
+  }
+
+  if (quote.status !== "pending") {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "QUOTE_ALREADY_PROCESSED",
+        message: "El presupuesto ya fue procesado",
+      },
+    });
+  }
+
+  quote.status = "rejected";
+  await quote.save();
+
+  console.log(`Presupuesto rechazado manualmente por admin: ${quote.quoteNumber}`);
+
+  await cacheService.invalidateQuotes();
+
+  res.json({
+    success: true,
+    message: "Presupuesto rechazado",
+    data: { quote },
+  });
+});
+
+// @desc    Eliminar presupuesto (soft delete)
+// @route   DELETE /api/quotes/:id
+// @access  Admin
+const deleteQuote = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const quote = await Quote.findById(id);
+
+  if (!quote) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: "QUOTE_NOT_FOUND",
+        message: "Presupuesto no encontrado",
+      },
+    });
+  }
+
+  if (quote.isDeleted) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "QUOTE_ALREADY_DELETED",
+        message: "El presupuesto ya está eliminado",
+      },
+    });
+  }
+
+  // Verificar si se puede eliminar
+  if (!quote.canDelete()) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: "CANNOT_DELETE_QUOTE",
+        message:
+          "Solo se pueden eliminar presupuestos pendientes sin orden de trabajo",
+      },
+    });
+  }
+
+  // Soft delete
+  await quote.softDelete(req.userId);
+
+  console.log(`Presupuesto eliminado: ${quote.quoteNumber} por usuario ID: ${req.userId}`);
+
+  await cacheService.invalidateQuotes();
+
+  res.json({
+    success: true,
+    message: "Presupuesto eliminado exitosamente",
+  });
+});
+
+module.exports = {
+  listQuotes,
+  getQuote,
+  createQuote,
+  updateQuote,
+  sendQuoteEmail,
+  approveQuote,
+  rejectQuote,
+  approveQuoteManual,
+  rejectQuoteManual,
+  deleteQuote,
+};
