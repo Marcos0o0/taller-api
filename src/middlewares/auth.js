@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const logger = require('../utils/logger');
 
 // Middleware para verificar token JWT
 const authenticate = async (req, res, next) => {
@@ -73,12 +72,6 @@ const authenticate = async (req, res, next) => {
       });
     }
 
-    logger.error('Error en autenticación:', {
-      module: 'auth',
-      action: 'authenticate_error',
-      metadata: { error: error.message }
-    });
-
     return res.status(500).json({
       success: false,
       error: {
@@ -103,16 +96,6 @@ const authorize = (...roles) => {
     }
 
     if (!roles.includes(req.user.role)) {
-      logger.warn('Acceso denegado por rol insuficiente', {
-        module: 'auth',
-        action: 'access_denied',
-        userId: req.user._id,
-        metadata: {
-          userRole: req.user.role,
-          requiredRoles: roles
-        }
-      });
-
       return res.status(403).json({
         success: false,
         error: {

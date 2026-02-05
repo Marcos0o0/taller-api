@@ -3,7 +3,6 @@ const helmet = require('helmet');
 const cors = require('cors');
 const requestId = require('./middlewares/requestId');
 const { notFound, errorHandler } = require('./middlewares/errorHandler');
-const logger = require('./utils/logger');
 
 const app = express();
 
@@ -26,13 +25,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Logging de requests en desarrollo
 if (process.env.NODE_ENV === 'development') {
   app.use((req, res, next) => {
-    logger.info(`${req.method} ${req.path}`, {
-      module: 'http',
-      action: 'request',
-      requestId: req.id,
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent')
-    });
+    console.log(`${req.method} ${req.path} - Request ID: ${req.id}`);
     next();
   });
 }
@@ -76,7 +69,7 @@ app.use('/api/quotes', require('./routes/quoteRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/mechanics', require('./routes/mechanicRoutes'));
 app.use('/api/dashboard', require('./routes/dashboardRoutes'));
-app.use('/api/logs', require('./routes/logRoutes'));
+app.use('/api/inventory', require('./routes/inventoryRoutes'));
 
 // Ruta raíz
 app.get('/', (req, res) => {
@@ -91,7 +84,6 @@ app.get('/', (req, res) => {
       quotes: '/api/quotes',
       orders: '/api/orders',
       mechanics: '/api/mechanics',
-      logs: '/api/logs'
     }
   });
 });

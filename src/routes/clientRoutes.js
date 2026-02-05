@@ -46,7 +46,7 @@ const createClientValidation = [
     .withMessage('Email es obligatorio')
     .isEmail()
     .withMessage('Email no válido')
-    .normalizeEmail()
+
 ];
 
 const updateClientValidation = [
@@ -79,7 +79,6 @@ const updateClientValidation = [
     .trim()
     .isEmail()
     .withMessage('Email no válido')
-    .normalizeEmail()
 ];
 
 const idValidation = [

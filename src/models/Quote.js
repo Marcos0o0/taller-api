@@ -223,6 +223,10 @@ const quoteSchema = new mongoose.Schema(
       type: String,
       unique: true,
     },
+    includeIVA: {
+      type: Boolean,
+      default: true,
+    },
     clientId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Client",

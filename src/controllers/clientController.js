@@ -1,8 +1,6 @@
 const Client = require("../models/Client");
 const Quote = require("../models/Quote");
-const SystemLog = require("../models/SystemLog");
 const cacheService = require("../services/cacheService");
-const logger = require("../utils/logger");
 const { asyncHandler } = require("../middlewares/errorHandler");
 
 // @desc    Listar clientes
@@ -25,11 +23,6 @@ const listClients = asyncHandler(async (req, res) => {
   // Intentar obtener desde caché
   const cached = await cacheService.get(cacheKey);
   if (cached) {
-    logger.debug("Clientes obtenidos desde caché", {
-      module: "clients",
-      action: "list_from_cache",
-      userId: req.userId,
-    });
     return res.json({
       success: true,
       data: cached,
@@ -77,13 +70,6 @@ const listClients = asyncHandler(async (req, res) => {
 
   // Guardar en caché por 10 minutos
   await cacheService.set(cacheKey, result, 600);
-
-  logger.info("Clientes listados exitosamente", {
-    module: "clients",
-    action: "list_success",
-    userId: req.userId,
-    metadata: { count: clients.length, total },
-  });
 
   res.json({
     success: true,
@@ -167,27 +153,7 @@ const createClient = asyncHandler(async (req, res) => {
     email,
   });
 
-  // Log
-  await SystemLog.createLog({
-    level: "info",
-    action: "client_created",
-    userId: req.userId,
-    module: "clients",
-    metadata: {
-      clientId: client._id,
-      clientEmail: client.email,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
-
-  logger.info("Cliente creado exitosamente", {
-    module: "clients",
-    action: "create_success",
-    userId: req.userId,
-    metadata: { clientId: client._id },
-  });
+  console.log(`Cliente creado: ${client.email} por usuario ID: ${req.userId}`);
 
   // Invalidar caché
   await cacheService.invalidateClients();
@@ -257,27 +223,7 @@ const updateClient = asyncHandler(async (req, res) => {
 
   await client.save();
 
-  // Log
-  await SystemLog.createLog({
-    level: "info",
-    action: "client_updated",
-    userId: req.userId,
-    module: "clients",
-    metadata: {
-      clientId: client._id,
-      changes: req.body,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
-
-  logger.info("Cliente actualizado exitosamente", {
-    module: "clients",
-    action: "update_success",
-    userId: req.userId,
-    metadata: { clientId: client._id },
-  });
+  console.log(`Cliente actualizado: ${client.email} por usuario ID: ${req.userId}`);
 
   // Invalidar caché
   await cacheService.invalidateClients();
@@ -335,27 +281,7 @@ const deleteClient = asyncHandler(async (req, res) => {
   // Soft delete
   await client.softDelete(req.userId);
 
-  // Log
-  await SystemLog.createLog({
-    level: "info",
-    action: "client_deleted",
-    userId: req.userId,
-    module: "clients",
-    metadata: {
-      clientId: client._id,
-      clientEmail: client.email,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
-
-  logger.info("Cliente eliminado exitosamente", {
-    module: "clients",
-    action: "delete_success",
-    userId: req.userId,
-    metadata: { clientId: client._id },
-  });
+  console.log(`Cliente eliminado: ${client.email} por usuario ID: ${req.userId}`);
 
   // Invalidar caché
   await cacheService.invalidateClients();

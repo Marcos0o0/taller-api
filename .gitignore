@@ -9,6 +9,8 @@ yarn.lock
 .env.development
 .env.production
 
+dump
+
 # Logs
 logs/
 *.log

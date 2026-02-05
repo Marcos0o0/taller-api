@@ -1,10 +1,8 @@
 const Quote = require("../models/Quote");
 const Client = require("../models/Client");
 const Mechanic = require("../models/Mechanic");
-const SystemLog = require("../models/SystemLog");
 const emailService = require("../services/emailService");
 const cacheService = require("../services/cacheService");
-const logger = require("../utils/logger");
 const { asyncHandler } = require("../middlewares/errorHandler");
 
 // @desc    Listar presupuestos
@@ -114,7 +112,7 @@ const getQuote = asyncHandler(async (req, res) => {
 // @route   POST /api/quotes
 // @access  Admin
 const createQuote = asyncHandler(async (req, res) => {
-  const { clientId, vehicle, description, proposedWork, estimatedCost, notes } = req.body;
+  const { clientId, vehicle, description, proposedWork, estimatedCost, notes, includeIVA } = req.body;
 
   // Verificar que el cliente existe y no está eliminado
   const client = await Client.findOne({
@@ -188,31 +186,10 @@ const createQuote = asyncHandler(async (req, res) => {
     proposedWork: proposedWork.trim(),
     estimatedCost,
     notes: notes?.trim(),
+    includeIVA: includeIVA !== undefined ? includeIVA : true,
   });
 
-  // Log
-  await SystemLog.createLog({
-    level: "info",
-    action: "quote_created",
-    userId: req.userId,
-    module: "quotes",
-    metadata: {
-      quoteId: quote._id,
-      quoteNumber: quote.quoteNumber,
-      clientId,
-      estimatedCost,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
-
-  logger.info("Presupuesto creado", {
-    module: "quotes",
-    action: "create_success",
-    userId: req.userId,
-    metadata: { quoteId: quote._id, quoteNumber: quote.quoteNumber },
-  });
+  console.log(`Presupuesto creado: ${quote.quoteNumber} - Cliente: ${clientId} - Costo: ${estimatedCost}`);
 
   await cacheService.invalidateQuotes();
 
@@ -228,7 +205,7 @@ const createQuote = asyncHandler(async (req, res) => {
 // @access  Admin
 const updateQuote = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { description, proposedWork, estimatedCost, notes } = req.body;
+  const { description, proposedWork, estimatedCost, notes, includeIVA } = req.body;
 
   const quote = await Quote.findById(id);
 
@@ -257,19 +234,11 @@ const updateQuote = asyncHandler(async (req, res) => {
   if (proposedWork) quote.proposedWork = proposedWork;
   if (estimatedCost !== undefined) quote.estimatedCost = estimatedCost;
   if (notes !== undefined) quote.notes = notes;
-
+  if (includeIVA !== undefined) quote.includeIVA = includeIVA;
+  
   await quote.save();
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "quote_updated",
-    userId: req.userId,
-    module: "quotes",
-    metadata: { quoteId: quote._id, changes: req.body },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
+  console.log(`Presupuesto actualizado: ${quote.quoteNumber} por usuario ID: ${req.userId}`);
 
   await cacheService.invalidateQuotes();
   await cacheService.delete(`cache:quote:${id}`);
@@ -347,20 +316,7 @@ const sendQuoteEmail = asyncHandler(async (req, res) => {
   quote.emailAttempts += 1;
   await quote.save();
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "quote_email_sent",
-    userId: req.userId,
-    module: "quotes",
-    metadata: {
-      quoteId: quote._id,
-      quoteNumber: quote.quoteNumber,
-      clientEmail: client.email,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
+  console.log(`Email enviado para presupuesto: ${quote.quoteNumber} a ${client.email}`);
 
   await cacheService.invalidateQuotes();
 
@@ -425,19 +381,7 @@ const approveQuote = asyncHandler(async (req, res) => {
   // Crear orden de trabajo automáticamente (como subdocumento)
   await quote.createWorkOrder();
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "quote_approved_by_client",
-    module: "quotes",
-    metadata: {
-      quoteId: quote._id,
-      quoteNumber: quote.quoteNumber,
-      orderNumber: quote.workOrder.orderNumber,
-      clientId: quote.clientId._id,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-  });
+  console.log(`Presupuesto aprobado por cliente: ${quote.quoteNumber} - Orden: ${quote.workOrder.orderNumber}`);
 
   await cacheService.invalidateQuotes();
 
@@ -521,18 +465,7 @@ const rejectQuote = asyncHandler(async (req, res) => {
   quote.status = "rejected";
   await quote.save();
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "quote_rejected_by_client",
-    module: "quotes",
-    metadata: {
-      quoteId: quote._id,
-      quoteNumber: quote.quoteNumber,
-      clientId: quote.clientId._id,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-  });
+  console.log(`Presupuesto rechazado por cliente: ${quote.quoteNumber}`);
 
   await cacheService.invalidateQuotes();
 
@@ -595,16 +528,7 @@ const approveQuoteManual = asyncHandler(async (req, res) => {
   // Crear orden automáticamente
   await quote.createWorkOrder();
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "quote_approved_by_admin",
-    userId: req.userId,
-    module: "quotes",
-    metadata: { quoteId: quote._id, orderNumber: quote.workOrder.orderNumber },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
+  console.log(`Presupuesto aprobado manualmente por admin: ${quote.quoteNumber} - Orden: ${quote.workOrder.orderNumber}`);
 
   await cacheService.invalidateQuotes();
 
@@ -643,16 +567,7 @@ const rejectQuoteManual = asyncHandler(async (req, res) => {
   quote.status = "rejected";
   await quote.save();
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "quote_rejected_by_admin",
-    userId: req.userId,
-    module: "quotes",
-    metadata: { quoteId: quote._id },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
+  console.log(`Presupuesto rechazado manualmente por admin: ${quote.quoteNumber}`);
 
   await cacheService.invalidateQuotes();
 
@@ -706,26 +621,7 @@ const deleteQuote = asyncHandler(async (req, res) => {
   // Soft delete
   await quote.softDelete(req.userId);
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "quote_deleted",
-    userId: req.userId,
-    module: "quotes",
-    metadata: {
-      quoteId: quote._id,
-      quoteNumber: quote.quoteNumber,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
-
-  logger.info("Presupuesto eliminado", {
-    module: "quotes",
-    action: "delete_success",
-    userId: req.userId,
-    metadata: { quoteId: quote._id },
-  });
+  console.log(`Presupuesto eliminado: ${quote.quoteNumber} por usuario ID: ${req.userId}`);
 
   await cacheService.invalidateQuotes();
 

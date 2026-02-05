@@ -1,5 +1,4 @@
 const rateLimit = require('express-rate-limit');
-const logger = require('../utils/logger');
 
 // Rate limiter para endpoints públicos (aprobar/rechazar presupuestos)
 const publicLimiter = rateLimit({
@@ -15,14 +14,7 @@ const publicLimiter = rateLimit({
     }
   },
   handler: (req, res) => {
-    logger.warn('Rate limit excedido - Endpoint público', {
-      module: 'security',
-      action: 'rate_limit_exceeded',
-      ipAddress: req.ip,
-      metadata: {
-        endpoint: req.path
-      }
-    });
+    console.warn(`Rate limit excedido - Endpoint público: ${req.path} - IP: ${req.ip}`);
 
     res.status(429).json({
       success: false,
@@ -42,14 +34,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
-    logger.warn('Rate limit excedido - Login', {
-      module: 'security',
-      action: 'login_rate_limit_exceeded',
-      ipAddress: req.ip,
-      metadata: {
-        username: req.body?.username
-      }
-    });
+    console.warn(`Rate limit excedido - Login - IP: ${req.ip} - Username: ${req.body?.username}`);
 
     res.status(429).json({
       success: false,

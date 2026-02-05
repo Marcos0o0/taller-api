@@ -36,9 +36,21 @@ const clientSchema = new mongoose.Schema(
       type: String,
       required: [true, "Email es obligatorio"],
       unique: true,
-      lowercase: true,
       trim: true,
-      match: [/^\S+@\S+\.\S+$/, "Email no válido"],
+      // IMPORTANTE: Removí lowercase aquí para preservar el formato original
+      // El email se normalizará en el setter personalizado
+      set: function(email) {
+        // Normalizar el email: trim y lowercase, pero SIN eliminar puntos
+        if (!email) return email;
+        return email.trim().toLowerCase();
+      },
+      validate: {
+        validator: function(v) {
+          // Validación más estricta de email
+          return /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(v);
+        },
+        message: "Email no válido"
+      }
     },
     isDeleted: {
       type: Boolean,

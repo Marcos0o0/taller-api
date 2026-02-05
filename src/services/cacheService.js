@@ -1,5 +1,4 @@
 const { getRedisClient } = require('../config/redis');
-const logger = require('../utils/logger');
 
 class CacheService {
   constructor() {
@@ -9,10 +8,6 @@ class CacheService {
   getClient() {
     const client = getRedisClient();
     if (!client || !client.isOpen) {
-      logger.warn('Redis no disponible, operación de caché omitida', {
-        module: 'cache',
-        action: 'client_unavailable'
-      });
       return null;
     }
     return client;
@@ -25,24 +20,11 @@ class CacheService {
     try {
       const data = await client.get(key);
       if (data) {
-        logger.debug(`Cache hit: ${key}`, {
-          module: 'cache',
-          action: 'get_hit'
-        });
         return JSON.parse(data);
       }
-      
-      logger.debug(`Cache miss: ${key}`, {
-        module: 'cache',
-        action: 'get_miss'
-      });
       return null;
     } catch (error) {
-      logger.error(`Error obteniendo caché: ${key}`, {
-        module: 'cache',
-        action: 'get_error',
-        metadata: { error: error.message }
-      });
+      console.error(`Error obteniendo caché: ${key} - ${error.message}`);
       return null;
     }
   }
@@ -54,18 +36,9 @@ class CacheService {
     try {
       const expirationTime = ttl || this.defaultTTL;
       await client.setEx(key, expirationTime, JSON.stringify(data));
-      
-      logger.debug(`Cache set: ${key} (TTL: ${expirationTime}s)`, {
-        module: 'cache',
-        action: 'set'
-      });
       return true;
     } catch (error) {
-      logger.error(`Error guardando caché: ${key}`, {
-        module: 'cache',
-        action: 'set_error',
-        metadata: { error: error.message }
-      });
+      console.error(`Error guardando caché: ${key} - ${error.message}`);
       return false;
     }
   }
@@ -76,17 +49,9 @@ class CacheService {
 
     try {
       await client.del(key);
-      logger.debug(`Cache deleted: ${key}`, {
-        module: 'cache',
-        action: 'delete'
-      });
       return true;
     } catch (error) {
-      logger.error(`Error eliminando caché: ${key}`, {
-        module: 'cache',
-        action: 'delete_error',
-        metadata: { error: error.message }
-      });
+      console.error(`Error eliminando caché: ${key} - ${error.message}`);
       return false;
     }
   }
@@ -99,19 +64,11 @@ class CacheService {
       const keys = await client.keys(pattern);
       if (keys.length > 0) {
         await client.del(keys);
-        logger.info(`Cache invalidated: ${pattern} (${keys.length} keys)`, {
-          module: 'cache',
-          action: 'invalidate',
-          metadata: { keysCount: keys.length }
-        });
+        console.log(`Cache invalidado: ${pattern} (${keys.length} claves)`);
       }
       return true;
     } catch (error) {
-      logger.error(`Error invalidando caché: ${pattern}`, {
-        module: 'cache',
-        action: 'invalidate_error',
-        metadata: { error: error.message }
-      });
+      console.error(`Error invalidando caché: ${pattern} - ${error.message}`);
       return false;
     }
   }
@@ -134,11 +91,7 @@ class CacheService {
       
       return data;
     } catch (error) {
-      logger.error(`Error en getOrFetch: ${key}`, {
-        module: 'cache',
-        action: 'getOrFetch_error',
-        metadata: { error: error.message }
-      });
+      console.error(`Error en getOrFetch: ${key} - ${error.message}`);
       
       // Si hay error, intentar obtener directamente sin caché
       return await fetchFn();
@@ -172,17 +125,10 @@ class CacheService {
 
     try {
       await client.flushAll();
-      logger.info('Cache completamente limpiado', {
-        module: 'cache',
-        action: 'flush_all'
-      });
+      console.log('Cache completamente limpiado');
       return true;
     } catch (error) {
-      logger.error('Error limpiando todo el caché', {
-        module: 'cache',
-        action: 'flush_all_error',
-        metadata: { error: error.message }
-      });
+      console.error(`Error limpiando todo el caché - ${error.message}`);
       return false;
     }
   }

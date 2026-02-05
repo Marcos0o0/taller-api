@@ -1,8 +1,6 @@
 const Quote = require("../models/Quote");
 const Mechanic = require("../models/Mechanic");
-const SystemLog = require("../models/SystemLog");
 const cacheService = require("../services/cacheService");
-const logger = require("../utils/logger");
 const { asyncHandler } = require("../middlewares/errorHandler");
 
 // @desc    Listar órdenes de trabajo
@@ -191,20 +189,7 @@ const updateOrder = asyncHandler(async (req, res) => {
     estimatedDelivery,
   });
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "order_updated",
-    userId: req.userId,
-    module: "orders",
-    metadata: {
-      quoteId: quote._id,
-      orderNumber: quote.workOrder.orderNumber,
-      changes: req.body,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
+  console.log(`Orden actualizada: ${quote.workOrder.orderNumber} por usuario ID: ${req.userId}`);
 
   await cacheService.invalidateQuotes();
 
@@ -288,32 +273,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     });
   }
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "order_status_changed",
-    userId: req.userId,
-    module: "orders",
-    metadata: {
-      quoteId: quote._id,
-      orderNumber: quote.workOrder.orderNumber,
-      newStatus: status,
-      notes,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
-
-  logger.info("Estado de orden cambiado", {
-    module: "orders",
-    action: "status_changed",
-    userId: req.userId,
-    metadata: {
-      quoteId: quote._id,
-      orderNumber: quote.workOrder.orderNumber,
-      newStatus: status,
-    },
-  });
+  console.log(`Estado de orden cambiado: ${quote.workOrder.orderNumber} a "${status}" por usuario ID: ${req.userId}`);
 
   await cacheService.invalidateQuotes();
 
@@ -373,31 +333,7 @@ const assignMechanic = asyncHandler(async (req, res) => {
   // Asignar mecánico usando el método del modelo
   await quote.assignMechanic(mechanicId, req.userId);
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "mechanic_assigned",
-    userId: req.userId,
-    module: "orders",
-    metadata: {
-      quoteId: quote._id,
-      orderNumber: quote.workOrder.orderNumber,
-      mechanicId,
-      mechanicName: mechanic.getFullName(),
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
-
-  logger.info("Mecánico asignado a orden", {
-    module: "orders",
-    action: "mechanic_assigned",
-    userId: req.userId,
-    metadata: {
-      quoteId: quote._id,
-      mechanicId,
-    },
-  });
+  console.log(`Mecánico ${mechanic.getFullName()} asignado a orden ${quote.workOrder.orderNumber}`);
 
   await cacheService.invalidateQuotes();
 
@@ -451,26 +387,7 @@ const deleteOrder = asyncHandler(async (req, res) => {
   // Soft delete del quote completo (incluye la orden)
   await quote.softDelete(req.userId);
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "order_deleted",
-    userId: req.userId,
-    module: "orders",
-    metadata: {
-      quoteId: quote._id,
-      orderNumber: quote.workOrder.orderNumber,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
-
-  logger.info("Orden eliminada", {
-    module: "orders",
-    action: "delete_success",
-    userId: req.userId,
-    metadata: { quoteId: quote._id },
-  });
+  console.log(`Orden eliminada: ${quote.workOrder.orderNumber} por usuario ID: ${req.userId}`);
 
   await cacheService.invalidateQuotes();
 

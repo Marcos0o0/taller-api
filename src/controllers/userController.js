@@ -1,7 +1,5 @@
 const User = require('../models/User');
 const Mechanic = require('../models/Mechanic');
-const SystemLog = require('../models/SystemLog');
-const logger = require('../utils/logger');
 const { asyncHandler } = require('../middlewares/errorHandler');
 
 // @desc    Listar usuarios
@@ -84,20 +82,7 @@ const createUser = asyncHandler(async (req, res) => {
     role: role || 'mechanic'
   });
 
-  await SystemLog.createLog({
-    level: 'info',
-    action: 'user_created',
-    userId: req.userId,
-    module: 'users',
-    metadata: {
-      newUserId: user._id,
-      newUsername: user.username,
-      newUserRole: user.role
-    },
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
-  });
+  console.log(`Usuario creado: ${user.username} (${user.role}) por usuario ID: ${req.userId}`);
 
   res.status(201).json({
     success: true,
@@ -154,19 +139,7 @@ const updateUser = asyncHandler(async (req, res) => {
 
   await user.save();
 
-  await SystemLog.createLog({
-    level: 'info',
-    action: 'user_updated',
-    userId: req.userId,
-    module: 'users',
-    metadata: {
-      targetUserId: user._id,
-      changes: req.body
-    },
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
-  });
+  console.log(`Usuario actualizado: ${user.username} por usuario ID: ${req.userId}`);
 
   res.json({
     success: true,
@@ -209,19 +182,7 @@ const changePassword = asyncHandler(async (req, res) => {
   user.tokenExpiration = null;
   await user.save();
 
-  await SystemLog.createLog({
-    level: 'info',
-    action: 'password_changed',
-    userId: req.userId,
-    module: 'users',
-    metadata: {
-      targetUserId: user._id,
-      targetUsername: user.username
-    },
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
-  });
+  console.log(`Contraseña cambiada para usuario: ${user.username} por usuario ID: ${req.userId}`);
 
   res.json({
     success: true,
@@ -266,16 +227,7 @@ const toggleUserStatus = asyncHandler(async (req, res) => {
     user.loginAttempts = 0;
     await user.save();
 
-    await SystemLog.createLog({
-      level: 'info',
-      action: 'user_activated',
-      userId: req.userId,
-      module: 'users',
-      metadata: { targetUserId: user._id },
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
-      requestId: req.id
-    });
+    console.log(`Usuario activado: ${user.username} por usuario ID: ${req.userId}`);
 
     return res.json({
       success: true,
@@ -287,16 +239,7 @@ const toggleUserStatus = asyncHandler(async (req, res) => {
     user.lockUntil = new Date('2099-12-31');
     await user.save();
 
-    await SystemLog.createLog({
-      level: 'warn',
-      action: 'user_deactivated',
-      userId: req.userId,
-      module: 'users',
-      metadata: { targetUserId: user._id },
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
-      requestId: req.id
-    });
+    console.warn(`Usuario desactivado: ${user.username} por usuario ID: ${req.userId}`);
 
     return res.json({
       success: true,
@@ -368,20 +311,7 @@ const deleteUser = asyncHandler(async (req, res) => {
   // Soft delete del usuario
   await user.softDelete(req.userId);
 
-  await SystemLog.createLog({
-    level: 'warn',
-    action: 'user_deleted',
-    userId: req.userId,
-    module: 'users',
-    metadata: {
-      targetUserId: user._id,
-      targetUsername: user.username,
-      targetRole: user.role
-    },
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
-  });
+  console.warn(`Usuario eliminado: ${user.username} (${user.role}) por usuario ID: ${req.userId}`);
 
   res.json({
     success: true,

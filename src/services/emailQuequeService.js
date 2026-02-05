@@ -1,5 +1,4 @@
 const emailService = require('./emailService');
-const logger = require('../utils/logger');
 const WorkOrder = require('../models/WorkOrder');
 const Quote = require('../models/Quote');
 const Client = require('../models/Client');
@@ -23,15 +22,7 @@ class EmailQueueService {
       status: 'pending'
     });
 
-    logger.info('Email agregado a la cola', {
-      module: 'emailQueue',
-      action: 'enqueue',
-      metadata: {
-        type: emailJob.type,
-        orderId: emailJob.orderId,
-        quoteId: emailJob.quoteId
-      }
-    });
+    console.log(`Email agregado a la cola - Tipo: ${emailJob.type}`);
 
     // Procesar cola si no está procesando
     if (!this.processing) {
@@ -64,15 +55,7 @@ class EmailQueueService {
 
         if (job.attempts >= this.maxRetries) {
           // Máximo de intentos alcanzado
-          logger.error('Email falló después de todos los reintentos', {
-            module: 'emailQueue',
-            action: 'max_retries_reached',
-            metadata: {
-              type: job.type,
-              attempts: job.attempts,
-              error: error.message
-            }
-          });
+          console.error(`Email falló después de ${job.attempts} intentos - Tipo: ${job.type} - Error: ${error.message}`);
 
           // Marcar como fallido y remover
           await this.markAsFailed(job);
@@ -81,15 +64,7 @@ class EmailQueueService {
           // Esperar antes del siguiente intento
           const delay = this.retryDelays[job.attempts] || 15000;
           
-          logger.warn(`Email falló, reintentando en ${delay}ms`, {
-            module: 'emailQueue',
-            action: 'retry_scheduled',
-            metadata: {
-              type: job.type,
-              attempt: job.attempts,
-              delay
-            }
-          });
+          console.warn(`Email falló, reintentando en ${delay}ms - Tipo: ${job.type} - Intento: ${job.attempts}`);
 
           await this.sleep(delay);
         }
@@ -154,15 +129,7 @@ class EmailQueueService {
     });
     await order.save();
 
-    logger.info('Email de orden lista enviado exitosamente', {
-      module: 'emailQueue',
-      action: 'order_ready_sent',
-      metadata: {
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        clientEmail: client.email
-      }
-    });
+    console.log(`Email de orden lista enviado - Orden: ${order.orderNumber} - Cliente: ${client.email}`);
 
     return result;
   }
@@ -184,15 +151,7 @@ class EmailQueueService {
       throw new Error(result.error);
     }
 
-    logger.info('Email de presupuesto enviado exitosamente', {
-      module: 'emailQueue',
-      action: 'quote_sent',
-      metadata: {
-        quoteId: quote._id,
-        quoteNumber: quote.quoteNumber,
-        clientEmail: client.email
-      }
-    });
+    console.log(`Email de presupuesto enviado - Presupuesto: ${quote.quoteNumber} - Cliente: ${client.email}`);
 
     return result;
   }
@@ -216,11 +175,7 @@ class EmailQueueService {
         }
       }
     } catch (error) {
-      logger.error('Error marcando email como fallido', {
-        module: 'emailQueue',
-        action: 'mark_failed_error',
-        metadata: { error: error.message }
-      });
+      console.error(`Error marcando email como fallido: ${error.message}`);
     }
   }
 

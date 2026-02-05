@@ -1,9 +1,7 @@
 const Mechanic = require("../models/Mechanic");
 const User = require("../models/User");
 const Quote = require("../models/Quote");
-const SystemLog = require("../models/SystemLog");
 const cacheService = require("../services/cacheService");
-const logger = require("../utils/logger");
 const { asyncHandler } = require("../middlewares/errorHandler");
 
 // @desc    Listar mecánicos
@@ -148,27 +146,7 @@ const createMechanic = asyncHandler(async (req, res) => {
     phone: phone.trim(),
   });
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "mechanic_created",
-    userId: req.userId,
-    module: "mechanics",
-    metadata: {
-      mechanicId: mechanic._id,
-      mechanicName: mechanic.getFullName(),
-      linkedUserId: userId,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
-
-  logger.info("Mecánico creado", {
-    module: "mechanics",
-    action: "create_success",
-    userId: req.userId,
-    metadata: { mechanicId: mechanic._id },
-  });
+  console.log(`Mecánico creado: ${mechanic.getFullName()} vinculado a usuario ID: ${userId}`);
 
   await cacheService.invalidateMechanics();
 
@@ -217,19 +195,7 @@ const updateMechanic = asyncHandler(async (req, res) => {
 
   await mechanic.save();
 
-  await SystemLog.createLog({
-    level: "info",
-    action: "mechanic_updated",
-    userId: req.userId,
-    module: "mechanics",
-    metadata: {
-      mechanicId: mechanic._id,
-      changes: req.body,
-    },
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
-    requestId: req.id,
-  });
+  console.log(`Mecánico actualizado: ${mechanic.getFullName()} por usuario ID: ${req.userId}`);
 
   await cacheService.invalidateMechanics();
 
@@ -294,13 +260,13 @@ const getMechanicOrders = asyncHandler(async (req, res) => {
       orders,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: parseInt(limit),  // ✅ Corregido: solo un paréntesis
         total,
         pages: Math.ceil(total / parseInt(limit)),
       },
     },
   });
-});
+});  // ✅ Corregido: solo una llave de cierre aquí
 
 module.exports = {
   listMechanics,
@@ -308,4 +274,4 @@ module.exports = {
   createMechanic,
   updateMechanic,
   getMechanicOrders,
-};
+}; 

@@ -8,7 +8,15 @@ const {
   getTrends
 } = require('../controllers/dashboardController');
 
-// Todas las rutas requieren admin
+// Debug: Verificar que las funciones existan
+console.log('Dashboard Controller Functions:', {
+  getGeneralStats: typeof getGeneralStats,
+  getMechanicsStats: typeof getMechanicsStats,
+  getRecentActivity: typeof getRecentActivity,
+  getTrends: typeof getTrends
+});
+
+// Todas las rutas requieren autenticación y autorización de admin
 router.use(authenticate, authorize('admin'));
 
 router.get('/stats', getGeneralStats);

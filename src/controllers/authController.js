@@ -1,7 +1,5 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const SystemLog = require('../models/SystemLog');
-const logger = require('../utils/logger');
 const { asyncHandler } = require('../middlewares/errorHandler');
 
 // Generar tokens JWT
@@ -46,28 +44,7 @@ const register = asyncHandler(async (req, res) => {
     role: role || 'mechanic'
   });
 
-  // Log de registro
-  await SystemLog.createLog({
-    level: 'info',
-    action: 'user_registered',
-    userId: req.userId,
-    module: 'auth',
-    metadata: {
-      newUserId: user._id,
-      newUsername: user.username,
-      newUserRole: user.role
-    },
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
-  });
-
-  logger.info('Usuario registrado exitosamente', {
-    module: 'auth',
-    action: 'register_success',
-    userId: req.userId,
-    metadata: { newUserId: user._id, username: user.username }
-  });
+  console.log(`Usuario registrado: ${user.username} (${user.role}) - ID: ${user._id}`);
 
   res.status(201).json({
     success: true,
@@ -93,16 +70,7 @@ const login = asyncHandler(async (req, res) => {
   const user = await User.findOne({ username, isDeleted: false });
 
   if (!user) {
-    await SystemLog.createLog({
-      level: 'warn',
-      action: 'login_failed_user_not_found',
-      module: 'auth',
-      metadata: { username },
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
-      requestId: req.id
-    });
-
+    console.warn(`Login fallido - Usuario no encontrado: ${username} - IP: ${req.ip}`);
     return res.status(401).json({
       success: false,
       error: {
@@ -115,18 +83,8 @@ const login = asyncHandler(async (req, res) => {
   // Verificar si está bloqueado
   if (user.isLocked()) {
     const lockTime = Math.ceil((user.lockUntil - Date.now()) / 60000);
+    console.warn(`Login bloqueado - Cuenta bloqueada: ${username} - Tiempo restante: ${lockTime}min`);
     
-    await SystemLog.createLog({
-      level: 'warn',
-      action: 'login_attempt_account_locked',
-      userId: user._id,
-      module: 'auth',
-      metadata: { username, lockTimeRemaining: lockTime },
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
-      requestId: req.id
-    });
-
     return res.status(423).json({
       success: false,
       error: {
@@ -142,20 +100,7 @@ const login = asyncHandler(async (req, res) => {
   if (!isValidPassword) {
     // Incrementar intentos fallidos
     await user.incLoginAttempts();
-
-    await SystemLog.createLog({
-      level: 'warn',
-      action: 'login_failed_invalid_password',
-      userId: user._id,
-      module: 'auth',
-      metadata: { 
-        username,
-        loginAttempts: user.loginAttempts + 1
-      },
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
-      requestId: req.id
-    });
+    console.warn(`Login fallido - Contraseña inválida: ${username} - Intentos: ${user.loginAttempts + 1}`);
 
     return res.status(401).json({
       success: false,
@@ -177,24 +122,7 @@ const login = asyncHandler(async (req, res) => {
   user.tokenExpiration = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await user.save();
 
-  // Log exitoso
-  await SystemLog.createLog({
-    level: 'info',
-    action: 'login_success',
-    userId: user._id,
-    module: 'auth',
-    metadata: { username },
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-    requestId: req.id
-  });
-
-  logger.info('Login exitoso', {
-    module: 'auth',
-    action: 'login_success',
-    userId: user._id,
-    metadata: { username }
-  });
+  console.log(`Login exitoso: ${username} - IP: ${req.ip}`);
 
   res.json({
     success: true,
@@ -246,17 +174,8 @@ const refresh = asyncHandler(async (req, res) => {
 
     // Verificar que el refresh token coincida
     if (user.refreshToken !== refreshToken) {
-      await SystemLog.createLog({
-        level: 'warn',
-        action: 'refresh_token_mismatch',
-        userId: user._id,
-        module: 'auth',
-        metadata: { username: user.username },
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent'),
-        requestId: req.id
-      });
-
+      console.warn(`Refresh token no coincide - Usuario: ${user.username}`);
+      
       return res.status(401).json({
         success: false,
         error: {
@@ -274,11 +193,7 @@ const refresh = asyncHandler(async (req, res) => {
     user.tokenExpiration = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await user.save();
 
-    logger.info('Token renovado exitosamente', {
-      module: 'auth',
-      action: 'token_refreshed',
-      userId: user._id
-    });
+    console.log(`Token renovado - Usuario: ${user.username}`);
 
     res.json({
       success: true,
@@ -315,22 +230,7 @@ const logout = asyncHandler(async (req, res) => {
     user.tokenExpiration = null;
     await user.save();
 
-    await SystemLog.createLog({
-      level: 'info',
-      action: 'logout',
-      userId: user._id,
-      module: 'auth',
-      metadata: { username: user.username },
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
-      requestId: req.id
-    });
-
-    logger.info('Logout exitoso', {
-      module: 'auth',
-      action: 'logout',
-      userId: user._id
-    });
+    console.log(`Logout exitoso - Usuario: ${user.username}`);
   }
 
   res.json({

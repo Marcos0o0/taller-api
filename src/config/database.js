@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const logger = require('../utils/logger');
 
 const connectDB = async () => {
   try {
@@ -10,41 +9,24 @@ const connectDB = async () => {
       socketTimeoutMS: 45000,
     });
 
-    logger.info(`MongoDB conectado: ${conn.connection.host}`, {
-      module: 'database',
-      action: 'connect'
-    });
+    console.log(`MongoDB conectado: ${conn.connection.host}`);
 
     // Eventos de conexión
     mongoose.connection.on('error', (err) => {
-      logger.error('Error de conexión MongoDB:', {
-        module: 'database',
-        action: 'connection_error',
-        metadata: { error: err.message }
-      });
+      console.error('Error de conexión MongoDB:', err.message);
     });
 
     mongoose.connection.on('disconnected', () => {
-      logger.warn('MongoDB desconectado', {
-        module: 'database',
-        action: 'disconnected'
-      });
+      console.warn('MongoDB desconectado');
     });
 
     mongoose.connection.on('reconnected', () => {
-      logger.info('MongoDB reconectado', {
-        module: 'database',
-        action: 'reconnected'
-      });
+      console.log('MongoDB reconectado');
     });
 
     return conn;
   } catch (error) {
-    logger.error('Error al conectar MongoDB:', {
-      module: 'database',
-      action: 'connect_error',
-      metadata: { error: error.message }
-    });
+    console.error('Error al conectar MongoDB:', error.message);
     process.exit(1);
   }
 };
@@ -52,16 +34,9 @@ const connectDB = async () => {
 const disconnectDB = async () => {
   try {
     await mongoose.connection.close();
-    logger.info('MongoDB desconectado correctamente', {
-      module: 'database',
-      action: 'disconnect'
-    });
+    console.log('MongoDB desconectado correctamente');
   } catch (error) {
-    logger.error('Error al desconectar MongoDB:', {
-      module: 'database',
-      action: 'disconnect_error',
-      metadata: { error: error.message }
-    });
+    console.error('Error al desconectar MongoDB:', error.message);
   }
 };
 

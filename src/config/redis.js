@@ -1,5 +1,4 @@
 const redis = require('redis');
-const logger = require('../utils/logger');
 
 let redisClient = null;
 
@@ -10,10 +9,7 @@ const connectRedis = async () => {
       socket: {
         reconnectStrategy: (retries) => {
           if (retries > 10) {
-            logger.error('Máximo de reintentos de conexión Redis alcanzado', {
-              module: 'redis',
-              action: 'max_retries'
-            });
+            console.error('Máximo de reintentos de conexión Redis alcanzado');
             return new Error('Máximo de reintentos alcanzado');
           }
           return Math.min(retries * 100, 3000);
@@ -22,43 +18,26 @@ const connectRedis = async () => {
     });
 
     redisClient.on('error', (err) => {
-      logger.error('Error de Redis:', {
-        module: 'redis',
-        action: 'error',
-        metadata: { error: err.message }
-      });
+      console.error(`Error de Redis: ${err.message}`);
     });
 
     redisClient.on('connect', () => {
-      logger.info('Redis conectado', {
-        module: 'redis',
-        action: 'connect'
-      });
+      console.log('Redis conectado');
     });
 
     redisClient.on('reconnecting', () => {
-      logger.warn('Redis reconectando...', {
-        module: 'redis',
-        action: 'reconnecting'
-      });
+      console.warn('Redis reconectando...');
     });
 
     redisClient.on('ready', () => {
-      logger.info('Redis listo', {
-        module: 'redis',
-        action: 'ready'
-      });
+      console.log('Redis listo');
     });
 
     await redisClient.connect();
     
     return redisClient;
   } catch (error) {
-    logger.error('Error al conectar Redis:', {
-      module: 'redis',
-      action: 'connect_error',
-      metadata: { error: error.message }
-    });
+    console.error(`Error al conectar Redis: ${error.message}`);
     // No exit process, la aplicación puede funcionar sin caché
     return null;
   }
@@ -72,16 +51,9 @@ const disconnectRedis = async () => {
   if (redisClient && redisClient.isOpen) {
     try {
       await redisClient.quit();
-      logger.info('Redis desconectado correctamente', {
-        module: 'redis',
-        action: 'disconnect'
-      });
+      console.log('Redis desconectado correctamente');
     } catch (error) {
-      logger.error('Error al desconectar Redis:', {
-        module: 'redis',
-        action: 'disconnect_error',
-        metadata: { error: error.message }
-      });
+      console.error(`Error al desconectar Redis: ${error.message}`);
     }
   }
 };
