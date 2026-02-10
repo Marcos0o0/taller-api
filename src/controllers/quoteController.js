@@ -965,8 +965,8 @@ module.exports = {
   getQuote,
   createQuote,
   updateQuote,
-  addAbono, // ✅ NUEVO
-  removeAbono, // ✅ NUEVO
+  addAbono,
+  removeAbono,
   sendQuoteEmail,
   approveQuote,
   rejectQuote,
