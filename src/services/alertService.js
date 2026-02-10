@@ -385,7 +385,7 @@ class AlertService {
       }
       
       if (resueltas > 0) {
-        console.log(`✅ Se auto-resolvieron ${resueltas} alertas de stock`);
+        console.log(`Se auto-resolvieron ${resueltas} alertas de stock`);
         this.emitirActualizacionAlertas();
       }
       

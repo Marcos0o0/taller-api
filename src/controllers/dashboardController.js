@@ -1,292 +1,296 @@
-// 📁 Archivo: backend/src/controllers/dashboardController.js
-
+// controllers/dashboard.controller.js
 const Quote = require('../models/Quote');
-const Client = require('../models/Client');
-const cacheService = require('../services/cacheService');
+const Product = require('../models/Product');
+const Alert = require('../models/Alert');
 const { asyncHandler } = require('../middlewares/errorHandler');
 
-// @desc    Obtener estadísticas generales
-// @route   GET /api/dashboard/stats
-// @access  Admin
-const getGeneralStats = asyncHandler(async (req, res) => {
-  const userId = req.userId;
-
-  const cacheKey = `cache:dashboard:general:${userId}`;
-  const cached = await cacheService.get(cacheKey);
+exports.getDashboardStats = asyncHandler(async (req, res) => {
+  const { startDate, endDate } = req.query;
   
-  if (cached) {
-    return res.json({
-      success: true,
-      data: cached,
-      cached: true,
-    });
-  }
-
-  // Fecha de hace 6 meses
-  const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-
-  // Fecha de hace 30 días
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-  // === ÓRDENES (usando Quote con workOrder) ===
-  const quotesWithOrders = await Quote.find({
-    workOrder: { $exists: true, $ne: null },
-    isDeleted: false
-  }).lean();
-
-  const totalOrders = quotesWithOrders.length;
+  const start = startDate ? new Date(startDate) : new Date(new Date().setMonth(new Date().getMonth() - 1));
+  const end = endDate ? new Date(endDate) : new Date();
   
-  const ordersByStatus = quotesWithOrders.reduce((acc, quote) => {
-    const status = quote.workOrder.status;
-    acc[status] = (acc[status] || 0) + 1;
-    return acc;
-  }, {});
-
-  const completedOrders = quotesWithOrders.filter(
-    q => q.workOrder.status === 'entregado'
-  ).length;
-
-  const recentOrders = quotesWithOrders.filter(
-    q => new Date(q.workOrder.createdAt) >= thirtyDaysAgo
-  ).length;
-
-  const orderStats = {
-    total: totalOrders,
-    pendiente_asignacion: ordersByStatus['pendiente_asignacion'] || 0,
-    en_progreso: ordersByStatus['en_progreso'] || 0,
-    listo: ordersByStatus['listo'] || 0,
-    entregado: ordersByStatus['entregado'] || 0,
-  };
-
-  // === COTIZACIONES ===
-  const [totalQuotes, quotesByStatus] = await Promise.all([
-    Quote.countDocuments({ isDeleted: false }),
+  const [
+    presupuestos,
+    ingresos,
+    vehiculos,
+    alertas,
+    ingresosMensuales,
+    productosCriticos,
+    presupuestosPorEstado,
+    serviciosMasComunes,
+  ] = await Promise.all([
+    // Presupuestos
+    {
+      total: await Quote.countDocuments({
+        createdAt: { $gte: start, $lte: end },
+        isDeleted: false,
+      }),
+      pendientes: await Quote.countDocuments({ status: 'pending' }),
+      aprobados: await Quote.countDocuments({
+        status: 'approved',
+        createdAt: { $gte: start, $lte: end },
+      }),
+      completados: await Quote.countDocuments({
+        status: 'completed',
+        createdAt: { $gte: start, $lte: end },
+      }),
+    },
+    
+    // Ingresos
+    Quote.aggregate([
+      {
+        $match: {
+          status: { $in: ['approved', 'completed'] },
+          createdAt: { $gte: start, $lte: end },
+          isDeleted: false,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$estimatedCost' },
+          cobrado: {
+            $sum: {
+              $sum: '$abonos.amount',
+            },
+          },
+        },
+      },
+    ]).then(result => result[0] || { total: 0, cobrado: 0 }),
+    
+    // Vehículos
+    {
+      total: await Quote.distinct('vehicleId', {
+        createdAt: { $gte: start, $lte: end },
+      }).then(ids => ids.length),
+      enServicio: await Quote.countDocuments({
+        status: 'approved',
+        'workOrder.status': 'in_progress',
+      }),
+    },
+    
+    // Alertas
+    {
+      activas: await Alert.countDocuments({ estado: 'activa' }),
+      criticas: await Alert.countDocuments({
+        estado: 'activa',
+        severidad: 'critica',
+      }),
+    },
+    
+    // Ingresos mensuales (últimos 6 meses)
+    Quote.aggregate([
+      {
+        $match: {
+          status: { $in: ['approved', 'completed'] },
+          createdAt: {
+            $gte: new Date(new Date().setMonth(new Date().getMonth() - 6)),
+          },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            mes: { $month: '$createdAt' },
+            año: { $year: '$createdAt' },
+          },
+          total: { $sum: '$estimatedCost' },
+          cobrado: { $sum: { $sum: '$abonos.amount' } },
+        },
+      },
+      { $sort: { '_id.año': 1, '_id.mes': 1 } },
+    ]).then(results =>
+      results.map(r => ({
+        mes: `${r._id.mes}/${r._id.año}`,
+        total: r.total,
+        cobrado: r.cobrado,
+      }))
+    ),
+    
+    // ✅ Productos críticos (stock bajo o agotado) - ADAPTADO
+    Product.find({
+      $expr: { $lte: ['$stock', '$minStock'] }, // ✅ Cambiado de stock.cantidad a stock
+      isActive: true, // ✅ Cambiado de activo a isActive
+      isDeleted: false, // ✅ Agregado para excluir eliminados
+    })
+      .limit(10)
+      .lean()
+      .then(products =>
+        products.map(p => ({
+          nombre: p.name, // ✅ Cambiado de nombre a name
+          codigo: p.barcode, // ✅ Cambiado de codigo a barcode
+          cantidad: p.stock, // ✅ Cambiado de stock.cantidad a stock
+          minimo: p.minStock, // ✅ Cambiado de stock.minimo a minStock
+          categoria: p.category, // ✅ Agregado campo adicional
+          ubicacion: p.location, // ✅ Agregado campo adicional
+        }))
+      ),
+    
+    // Presupuestos por estado
     Quote.aggregate([
       { $match: { isDeleted: false } },
-      { $group: { _id: '$status', count: { $sum: 1 } } }
-    ]),
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]).then(results =>
+      results.map(r => ({
+        type: r._id,
+        value: r.count,
+      }))
+    ),
+    
+    // Servicios más comunes
+    Quote.aggregate([
+      { $match: { isDeleted: false } },
+      {
+        $project: {
+          services: {
+            $cond: {
+              if: { $isArray: '$proposedWork' },
+              then: '$proposedWork',
+              else: [],
+            },
+          },
+        },
+      },
+      { $unwind: '$services' },
+      { $group: { _id: '$services', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 10 },
+    ]).then(results =>
+      results.map(r => ({
+        servicio: r._id,
+        cantidad: r.count,
+      }))
+    ),
   ]);
-
-  const quoteStats = {
-    total: totalQuotes,
-    pending: quotesByStatus.find(s => s._id === 'pending')?.count || 0,
-    approved: quotesByStatus.find(s => s._id === 'approved')?.count || 0,
-    rejected: quotesByStatus.find(s => s._id === 'rejected')?.count || 0,
-  };
-
-  // === INGRESOS ===
-  const completedQuotes = quotesWithOrders.filter(
-    q => q.workOrder.status === 'entregado' && q.workOrder.finalCost
-  );
-
-  const totalRevenue = completedQuotes.reduce(
-    (sum, q) => sum + (q.workOrder.finalCost || 0),
-    0
-  );
-
-  const averageOrderValue = completedQuotes.length > 0 
-    ? totalRevenue / completedQuotes.length 
-    : 0;
-
-  // === CLIENTES ===
-  const [totalClients, newClientsThisMonth] = await Promise.all([
-    Client.countDocuments({ isDeleted: false }),
-    Client.countDocuments({ 
-      isDeleted: false,
-      createdAt: { 
-        $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) 
-      } 
-    }),
-  ]);
-
-  const result = {
-    revenue: {
-      total: totalRevenue,
-      averageOrderValue: Math.round(averageOrderValue),
-      completedOrders: completedQuotes.length,
-    },
-    orders: orderStats,
-    quotes: quoteStats,
-    clients: {
-      total: totalClients,
-      newThisMonth: newClientsThisMonth,
-    },
-    recentActivity: {
-      ordersLast30Days: recentOrders,
-    },
-  };
-
-  await cacheService.set(cacheKey, result, 300);
-
-  res.json({
-    success: true,
-    data: result,
-  });
-});
-
-// @desc    Obtener estadísticas de mecánicos
-// @route   GET /api/dashboard/mechanics-stats
-// @access  Admin
-const getMechanicsStats = asyncHandler(async (req, res) => {
-  // Por ahora devolver datos vacíos si no existe el modelo User
+  
   res.json({
     success: true,
     data: {
-      mechanics: []
+      presupuestos,
+      ingresos,
+      vehiculos,
+      alertas,
+      ingresosMensuales,
+      productosCriticos, // ✅ Renombrado de repuestosCriticos
+      presupuestosPorEstado,
+      serviciosMasComunes,
     },
   });
 });
 
-// @desc    Obtener actividad reciente
-// @route   GET /api/dashboard/recent-activity
-// @access  Admin
-const getRecentActivity = asyncHandler(async (req, res) => {
-  const cacheKey = `cache:dashboard:recent`;
-  const cached = await cacheService.get(cacheKey);
-  
-  if (cached) {
-    return res.json({
-      success: true,
-      data: cached,
-      cached: true,
-    });
-  }
-
-  // Servicios recientes
-  const recentServices = await Quote.aggregate([
-    { 
-      $match: { 
-        isDeleted: false,
-        'workOrder.status': { $in: ['en_progreso', 'listo', 'entregado'] } 
-      } 
-    },
-    { $sort: { 'workOrder.updatedAt': -1 } },
-    { $limit: 10 },
-    { $unwind: '$services' },
-    {
-      $lookup: {
-        from: 'clients',
-        localField: 'clientId',
-        foreignField: '_id',
-        as: 'client'
-      }
-    },
-    { $unwind: { path: '$client', preserveNullAndEmptyArrays: true } },
-    {
-      $project: {
-        _id: '$services._id',
-        name: '$services.name',
-        price: '$services.price',
-        clientName: {
-          $concat: [
-            { $ifNull: ['$client.firstName', ''] },
-            ' ',
-            { $ifNull: ['$client.lastName1', ''] }
-          ]
+// ✅ NUEVO: Endpoint adicional para estadísticas de inventario
+exports.getInventoryStats = asyncHandler(async (req, res) => {
+  const [
+    totalProductos,
+    productosActivos,
+    productosStockBajo,
+    productosAgotados,
+    valorInventario,
+    productosPorCategoria,
+    movimientosRecientes,
+  ] = await Promise.all([
+    // Total de productos
+    Product.countDocuments({ isDeleted: false }),
+    
+    // Productos activos
+    Product.countDocuments({ isActive: true, isDeleted: false }),
+    
+    // Productos con stock bajo
+    Product.countDocuments({
+      $expr: { $lte: ['$stock', '$minStock'] },
+      stock: { $gt: 0 },
+      isActive: true,
+      isDeleted: false,
+    }),
+    
+    // Productos agotados
+    Product.countDocuments({
+      stock: 0,
+      isActive: true,
+      isDeleted: false,
+    }),
+    
+    // Valor total del inventario
+    Product.aggregate([
+      {
+        $match: {
+          isActive: true,
+          isDeleted: false,
         },
-        createdAt: '$workOrder.createdAt'
-      }
-    },
-    { $limit: 5 }
+      },
+      {
+        $group: {
+          _id: null,
+          valorCosto: { $sum: { $multiply: ['$costPrice', '$stock'] } },
+          valorVenta: { $sum: { $multiply: ['$price', '$stock'] } },
+        },
+      },
+    ]).then(result => result[0] || { valorCosto: 0, valorVenta: 0 }),
+    
+    // Productos por categoría
+    Product.aggregate([
+      { $match: { isDeleted: false, isActive: true } },
+      {
+        $group: {
+          _id: '$category',
+          cantidad: { $sum: 1 },
+          stockTotal: { $sum: '$stock' },
+        },
+      },
+      { $sort: { cantidad: -1 } },
+    ]),
+    
+    // Movimientos recientes (últimos 7 días)
+    Product.aggregate([
+      {
+        $match: {
+          isDeleted: false,
+          'stockMovements.createdAt': {
+            $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+          },
+        },
+      },
+      { $unwind: '$stockMovements' },
+      {
+        $match: {
+          'stockMovements.createdAt': {
+            $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+          },
+        },
+      },
+      {
+        $group: {
+          _id: '$stockMovements.type',
+          cantidad: { $sum: 1 },
+          total: { $sum: '$stockMovements.quantity' },
+        },
+      },
+    ]),
   ]);
-
-  const result = {
-    recentServices,
-    lowStockProducts: [], // Vacío por ahora si no existe Product
-  };
-
-  await cacheService.set(cacheKey, result, 300);
-
-  res.json({
-    success: true,
-    data: result,
-  });
-});
-
-// @desc    Obtener tendencias
-// @route   GET /api/dashboard/trends
-// @access  Admin
-const getTrends = asyncHandler(async (req, res) => {
-  const cacheKey = `cache:dashboard:trends`;
-  const cached = await cacheService.get(cacheKey);
   
-  if (cached) {
-    return res.json({
-      success: true,
-      data: cached,
-      cached: true,
-    });
-  }
-
-  const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-
-  // Ingresos mensuales
-  const quotesWithOrders = await Quote.find({
-    workOrder: { $exists: true, $ne: null },
-    isDeleted: false,
-    'workOrder.status': 'entregado',
-    'workOrder.createdAt': { $gte: sixMonthsAgo }
-  }).lean();
-
-  const monthlyRevenueMap = quotesWithOrders.reduce((acc, quote) => {
-    const date = new Date(quote.workOrder.createdAt);
-    const month = date.getMonth() + 1;
-    const year = date.getFullYear();
-    const key = `${year}-${month}`;
-    
-    if (!acc[key]) {
-      acc[key] = { month, year, total: 0, count: 0 };
-    }
-    
-    acc[key].total += quote.workOrder.finalCost || 0;
-    acc[key].count += 1;
-    
-    return acc;
-  }, {});
-
-  const monthlyRevenue = Object.values(monthlyRevenueMap)
-    .sort((a, b) => a.year - b.year || a.month - b.month);
-
-  // Servicios más vendidos
-  const topServices = await Quote.aggregate([
-    { 
-      $match: { 
-        isDeleted: false,
-        'workOrder.status': 'entregado' 
-      } 
-    },
-    { $unwind: '$services' },
-    {
-      $group: {
-        _id: '$services.name',
-        name: { $first: '$services.name' },
-        count: { $sum: 1 },
-        total: { $sum: '$services.price' }
-      }
-    },
-    { $sort: { count: -1 } },
-    { $limit: 5 }
-  ]);
-
-  const result = {
-    monthlyRevenue,
-    topServices,
-  };
-
-  await cacheService.set(cacheKey, result, 300);
-
   res.json({
     success: true,
-    data: result,
+    data: {
+      resumen: {
+        totalProductos,
+        productosActivos,
+        productosStockBajo,
+        productosAgotados,
+      },
+      valorInventario,
+      productosPorCategoria: productosPorCategoria.map(cat => ({
+        categoria: cat._id,
+        cantidad: cat.cantidad,
+        stockTotal: cat.stockTotal,
+      })),
+      movimientosRecientes: movimientosRecientes.map(mov => ({
+        tipo: mov._id,
+        cantidad: mov.cantidad,
+        total: mov.total,
+      })),
+    },
   });
 });
 
-module.exports = {
-  getGeneralStats,
-  getMechanicsStats,
-  getRecentActivity,
-  getTrends,
-};
+module.exports = exports;

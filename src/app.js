@@ -1,10 +1,88 @@
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
+const http = require('http');
+const socketIO = require('socket.io');
 const requestId = require('./middlewares/requestId');
 const { notFound, errorHandler } = require('./middlewares/errorHandler');
 
 const app = express();
+
+// ✅ Crear servidor HTTP
+const server = http.createServer(app);
+
+// ✅ Configurar Socket.IO
+const io = socketIO(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || '*',
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+  transports: ['websocket', 'polling'],
+});
+
+// ✅ Middleware de autenticación para WebSocket
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth.token;
+    
+    if (!token) {
+      return next(new Error('No token provided'));
+    }
+    
+    // Verificar token JWT
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    socket.userId = decoded.id;
+    socket.userRole = decoded.role;
+    
+    next();
+  } catch (error) {
+    console.error('Socket auth error:', error);
+    next(new Error('Authentication failed'));
+  }
+});
+
+// ✅ Manejo de conexiones WebSocket
+io.on('connection', (socket) => {
+  console.log(`✅ Cliente conectado: ${socket.id} (User: ${socket.userId})`);
+  
+  // Unir a sala de alertas
+  socket.join('alerts');
+  
+  // Enviar estadísticas iniciales
+  const alertService = require('./services/alertService');
+  alertService.obtenerEstadisticas().then((stats) => {
+    socket.emit('alertas-actualizadas', stats);
+  }).catch(err => {
+    console.error('Error obteniendo estadísticas iniciales:', err);
+  });
+  
+  // Escuchar solicitud de actualización
+  socket.on('solicitar-alertas', async (filters) => {
+    try {
+      const Alert = require('./models/Alert');
+      const alerts = await Alert.find(filters || { estado: 'activa' })
+        .populate('producto')
+        .limit(10)
+        .sort('-fechaCreacion');
+      
+      socket.emit('alertas-enviadas', alerts);
+    } catch (error) {
+      console.error('Error enviando alertas:', error);
+      socket.emit('error', { message: 'Error al obtener alertas' });
+    }
+  });
+  
+  // Desconexión
+  socket.on('disconnect', () => {
+    console.log(`❌ Cliente desconectado: ${socket.id}`);
+  });
+});
+
+// ✅ Exportar io para usar en alertService
+module.exports.io = io;
 
 // Middlewares de seguridad
 app.use(helmet());
@@ -41,7 +119,11 @@ app.get('/health', async (req, res) => {
     uptime: process.uptime(),
     services: {
       mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-      redis: 'unknown'
+      redis: 'unknown',
+      websocket: io.engine.clientsCount >= 0 ? 'active' : 'inactive'
+    },
+    connections: {
+      websocket: io.engine.clientsCount || 0
     }
   };
 
@@ -71,6 +153,7 @@ app.use('/api/mechanics', require('./routes/mechanicRoutes'));
 app.use('/api/dashboard', require('./routes/dashboardRoutes'));
 app.use('/api/inventory', require('./routes/inventoryRoutes'));
 app.use('/api/vehicles', require('./routes/vehicleRoutes'));
+app.use('/api/alerts', require('./routes/alertsRoutes')); // ✅ Nueva ruta de alertas
 
 // Ruta raíz
 app.get('/', (req, res) => {
@@ -78,6 +161,10 @@ app.get('/', (req, res) => {
     success: true,
     message: 'API del Sistema de Gestión de Taller Mecánico',
     version: '1.0.0',
+    websocket: {
+      connected: io.engine.clientsCount || 0,
+      status: 'active'
+    },
     endpoints: {
       health: '/health',
       auth: '/api/auth',
@@ -85,6 +172,8 @@ app.get('/', (req, res) => {
       quotes: '/api/quotes',
       orders: '/api/orders',
       mechanics: '/api/mechanics',
+      inventory: '/api/inventory',
+      alerts: '/api/alerts',
     }
   });
 });
@@ -95,4 +184,5 @@ app.use(notFound);
 // Manejo global de errores
 app.use(errorHandler);
 
-module.exports = app;
+// ✅ Exportar tanto app como server
+module.exports = { app, server, io };
