@@ -9,10 +9,10 @@ const {
   dismissAlert,
   forceAlertCheck,
 } = require('../controllers/alertController');
-const { protect, authorize } = require('../middlewares/auth');
+const { authenticate, authorize } = require('../middlewares/auth');
 
 // Todas las rutas requieren autenticación
-router.use(protect);
+router.use(authenticate);
 
 // Listar alertas
 router.get('/', authorize('admin', 'gerente'), listAlerts);

@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { app, server, io } = require('./app'); // ✅ Importar server e io además de app
+const { app, server, io } = require('./app');
 const { connectDB, disconnectDB } = require('./config/database');
 const { connectRedis, disconnectRedis } = require('./config/redis');
 const emailService = require('./services/emailService');
