@@ -28,7 +28,7 @@ const alertSchema = new Schema({
   // Referencia al repuesto
   repuesto: {
     type: Schema.Types.ObjectId,
-    ref: 'Part',
+    ref: 'Product',
     required: true,
   },
   
