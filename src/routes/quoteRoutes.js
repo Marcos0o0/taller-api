@@ -102,5 +102,8 @@ router.post("/:id/send-email", idValidation, validate, sendQuoteEmail);
 router.put("/:id/approve", idValidation, validate, approveQuoteManual);
 router.put("/:id/reject", idValidation, validate, rejectQuoteManual);
 router.delete("/:id", idValidation, validate, deleteQuote);
+router.post('/:id/abonos', protect, quotesController.addAbono);
+router.delete('/:id/abonos/:abonoIndex', protect, quotesController.removeAbono);
+
 
 module.exports = router;

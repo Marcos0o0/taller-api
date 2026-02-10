@@ -70,6 +70,30 @@ const approvalTokenSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// ✅ NUEVO: Schema para abonos
+const abonoSchema = new mongoose.Schema(
+  {
+    amount: {
+      type: Number,
+      required: [true, "Monto del abono es obligatorio"],
+      min: [0, "El monto debe ser mayor a 0"],
+    },
+    date: {
+      type: Date,
+      default: Date.now,
+    },
+    notes: {
+      type: String,
+      maxlength: [500, "Notas no pueden exceder 500 caracteres"],
+    },
+    registeredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  },
+  { _id: false }
+);
+
 // SUBDOCUMENTO: Status History
 const statusHistorySchema = new mongoose.Schema(
   {
@@ -232,9 +256,18 @@ const quoteSchema = new mongoose.Schema(
       ref: "Client",
       required: [true, "Cliente es obligatorio"],
     },
+    // ✅ MEJORADO: Soporte para vehículo como objeto O referencia
     vehicle: {
       type: vehicleSchema,
-      required: [true, "Datos del vehículo son obligatorios"],
+      required: function() {
+        // Solo requerido si no hay vehicleId
+        return !this.vehicleId;
+      },
+    },
+    // ✅ NUEVO: Referencia a vehículo existente
+    vehicleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Vehicle",
     },
     description: {
       type: String,
@@ -274,6 +307,19 @@ const quoteSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // ✅ NUEVO: Abonos/Pagos anticipados
+    abonos: [abonoSchema],
+    totalAbonos: {
+      type: Number,
+      default: 0,
+      min: [0, "Total de abonos no puede ser negativo"],
+    },
+    saldoPendiente: {
+      type: Number,
+      default: function() {
+        return this.estimatedCost || 0;
+      },
+    },
     // WorkOrder ahora es un subdocumento
     workOrder: {
       type: workOrderSchema,
@@ -308,9 +354,20 @@ quoteSchema.index({ clientId: 1, status: 1, createdAt: -1 });
 quoteSchema.index({ status: 1, createdAt: -1 });
 quoteSchema.index({ "approvalTokens.token": 1 });
 quoteSchema.index({ "vehicle.licensePlate": 1, isDeleted: 1 });
+quoteSchema.index({ vehicleId: 1 }); // ✅ NUEVO índice
 quoteSchema.index({ "workOrder.orderNumber": 1 });
 quoteSchema.index({ "workOrder.mechanicId": 1, "workOrder.status": 1 });
 quoteSchema.index({ "workOrder.status": 1, createdAt: -1 });
+
+// Validación de patente única activa por cliente
+quoteSchema.index(
+  { 
+    clientId: 1, 
+    'vehicle.licensePlate': 1,
+    status: 1,
+    isDeleted: 1 
+  }
+);
 
 // Generar número de presupuesto automáticamente
 quoteSchema.pre("save", async function (next) {
@@ -322,6 +379,171 @@ quoteSchema.pre("save", async function (next) {
   // Actualizar updatedAt del workOrder si existe
   if (this.workOrder && this.isModified("workOrder")) {
     this.workOrder.updatedAt = new Date();
+  }
+
+  next();
+});
+
+// ✅ NUEVO: Pre-save hook para validar y calcular abonos
+quoteSchema.pre('save', function(next) {
+  // Validar que se proporcione vehicle O vehicleId
+  if (!this.vehicle && !this.vehicleId) {
+    const error = new Error('Debe proporcionar datos del vehículo o una referencia a un vehículo existente');
+    error.name = 'ValidationError';
+    return next(error);
+  }
+
+  // Calcular totales de abonos automáticamente
+  if (this.isModified('abonos') || this.isNew) {
+    this.totalAbonos = this.abonos.reduce((sum, abono) => sum + abono.amount, 0);
+    this.saldoPendiente = this.estimatedCost - this.totalAbonos;
+  }
+
+  // Validar que los abonos no excedan el costo estimado
+  if (this.totalAbonos > this.estimatedCost) {
+    const error = new Error('Los abonos no pueden exceder el costo estimado del presupuesto');
+    error.name = 'ValidationError';
+    return next(error);
+  }
+
+  // Validar saldo pendiente
+  if (this.saldoPendiente < 0) {
+    const error = new Error('El saldo pendiente no puede ser negativo');
+    error.name = 'ValidationError';
+    return next(error);
+  }
+
+  next();
+});
+
+// Validación antes de guardar
+quoteSchema.pre('save', async function(next) {
+  // Validar que el cliente existe
+  if (this.isModified('clientId')) {
+    const Client = mongoose.model('Client');
+    const client = await Client.findOne({
+      _id: this.clientId,
+      isDeleted: false
+    });
+    
+    if (!client) {
+      const error = new Error('Cliente no encontrado o eliminado');
+      error.name = 'ValidationError';
+      return next(error);
+    }
+  }
+
+  // ✅ NUEVO: Validar que el vehículo existe si se proporciona vehicleId
+  if (this.isModified('vehicleId') && this.vehicleId) {
+    const Vehicle = mongoose.model('Vehicle');
+    const vehicle = await Vehicle.findOne({
+      _id: this.vehicleId,
+      isActive: true
+    });
+    
+    if (!vehicle) {
+      const error = new Error('Vehículo no encontrado o inactivo');
+      error.name = 'ValidationError';
+      return next(error);
+    }
+
+    // ✅ Opcional: Actualizar kilometraje del vehículo si es mayor
+    if (this.vehicle && this.vehicle.mileage > vehicle.kilometraje) {
+      await Vehicle.findByIdAndUpdate(this.vehicleId, {
+        $max: { kilometraje: this.vehicle.mileage }
+      });
+    }
+  }
+
+  // Validar que la fecha de validez sea futura
+  if (this.isModified('validUntil') && this.validUntil < new Date()) {
+    const error = new Error('La fecha de validez debe ser futura');
+    error.name = 'ValidationError';
+    return next(error);
+  }
+
+  // Validar que no se puede cambiar a aprobado si ya expiró
+  if (this.isModified('status') && this.status === 'approved') {
+    if (this.validUntil < new Date()) {
+      const error = new Error('No se puede aprobar un presupuesto expirado');
+      error.name = 'ValidationError';
+      return next(error);
+    }
+  }
+
+  // Validar costo estimado positivo
+  if (this.isModified('estimatedCost') && this.estimatedCost < 0) {
+    const error = new Error('El costo estimado debe ser mayor o igual a 0');
+    error.name = 'ValidationError';
+    return next(error);
+  }
+
+  // Validar año del vehículo (solo si vehicle está definido)
+  if (this.vehicle && this.isModified('vehicle.year')) {
+    const currentYear = new Date().getFullYear();
+    if (this.vehicle.year < 1950 || this.vehicle.year > currentYear + 1) {
+      const error = new Error(`Año del vehículo debe estar entre 1950 y ${currentYear + 1}`);
+      error.name = 'ValidationError';
+      return next(error);
+    }
+  }
+
+  // Validar patente (formato chileno básico) - solo si vehicle está definido
+  if (this.vehicle && this.isModified('vehicle.licensePlate')) {
+    const plate = this.vehicle.licensePlate.toUpperCase().replace(/[\s-]/g, '');
+    
+    const isValidFormat = /^[A-Z]{2,4}\d{2,4}$/.test(plate);
+    
+    if (!isValidFormat) {
+      const error = new Error('Formato de patente inválido');
+      error.name = 'ValidationError';
+      return next(error);
+    }
+
+    this.vehicle.licensePlate = plate; // Normalizar
+  }
+
+  // Validar kilometraje - solo si vehicle está definido
+  if (this.vehicle && this.isModified('vehicle.mileage') && this.vehicle.mileage < 0) {
+    const error = new Error('El kilometraje no puede ser negativo');
+    error.name = 'ValidationError';
+    return next(error);
+  }
+
+  next();
+});
+
+// Validación del workOrder
+quoteSchema.pre('save', function(next) {
+  // Si hay workOrder, validar sus campos
+  if (this.workOrder) {
+    // Validar costo final si existe
+    if (this.workOrder.finalCost !== undefined && this.workOrder.finalCost < 0) {
+      const error = new Error('El costo final debe ser mayor o igual a 0');
+      error.name = 'ValidationError';
+      return next(error);
+    }
+
+    // Validar que tenga mecánico si está en progreso
+    if (this.workOrder.status === 'en_progreso' && !this.workOrder.mechanicId) {
+      const error = new Error('Debe asignar un mecánico antes de iniciar el trabajo');
+      error.name = 'ValidationError';
+      return next(error);
+    }
+
+    // Validar fecha estimada de entrega
+    if (this.workOrder.estimatedDelivery && this.workOrder.estimatedDelivery < new Date()) {
+      const error = new Error('La fecha estimada de entrega debe ser futura');
+      error.name = 'ValidationError';
+      return next(error);
+    }
+
+    // Validar que la fecha real de entrega no sea futura
+    if (this.workOrder.actualDelivery && this.workOrder.actualDelivery > new Date()) {
+      const error = new Error('La fecha real de entrega no puede ser futura');
+      error.name = 'ValidationError';
+      return next(error);
+    }
   }
 
   next();
@@ -391,6 +613,80 @@ quoteSchema.methods.useToken = async function (token, ipAddress, userAgent) {
 
     await this.save();
   }
+};
+
+// ✅ NUEVO: Método para agregar abono
+quoteSchema.methods.addAbono = async function (amount, notes = '', registeredBy = null) {
+  // Validar que el monto sea positivo
+  if (amount <= 0) {
+    throw new Error('El monto del abono debe ser mayor a 0');
+  }
+
+  // Validar que no exceda el saldo pendiente
+  if (amount > this.saldoPendiente) {
+    throw new Error(`El abono excede el saldo pendiente ($${this.saldoPendiente.toLocaleString('es-CL')})`);
+  }
+
+  // Agregar el abono
+  this.abonos.push({
+    amount,
+    date: new Date(),
+    notes,
+    registeredBy
+  });
+
+  // Recalcular totales (esto se hace automáticamente en el pre-save hook)
+  await this.save();
+
+  return this;
+};
+
+// ✅ NUEVO: Método para eliminar abono
+quoteSchema.methods.removeAbono = async function (abonoIndex) {
+  if (abonoIndex < 0 || abonoIndex >= this.abonos.length) {
+    throw new Error('Índice de abono inválido');
+  }
+
+  // Solo permitir eliminar si el presupuesto está pendiente
+  if (this.status !== 'pending') {
+    throw new Error('Solo se pueden eliminar abonos de presupuestos pendientes');
+  }
+
+  this.abonos.splice(abonoIndex, 1);
+  await this.save();
+
+  return this;
+};
+
+// ✅ NUEVO: Método para obtener información completa del vehículo
+quoteSchema.methods.getVehicleInfo = async function () {
+  if (this.vehicleId) {
+    // Si hay referencia, buscar el vehículo completo
+    const Vehicle = mongoose.model('Vehicle');
+    const vehicle = await Vehicle.findById(this.vehicleId);
+    
+    if (vehicle) {
+      return {
+        _id: vehicle._id,
+        brand: vehicle.marca,
+        model: vehicle.modelo,
+        year: vehicle.año,
+        licensePlate: vehicle.patente,
+        mileage: vehicle.kilometraje,
+        source: 'reference'
+      };
+    }
+  }
+
+  // Si no hay referencia o no se encontró, retornar el objeto embebido
+  if (this.vehicle) {
+    return {
+      ...this.vehicle.toObject(),
+      source: 'embedded'
+    };
+  }
+
+  return null;
 };
 
 // Validar si se puede editar
@@ -590,18 +886,66 @@ quoteSchema.methods.canDeleteWorkOrder = function () {
   return this.workOrder && this.workOrder.status === "pendiente_asignacion";
 };
 
+// Método para validar mecánico antes de asignar
+quoteSchema.methods.validateMechanicAssignment = async function(mechanicId) {
+  const Mechanic = mongoose.model('Mechanic');
+  
+  const mechanic = await Mechanic.findOne({
+    _id: mechanicId,
+    isDeleted: false,
+    isActive: true
+  });
+
+  if (!mechanic) {
+    return {
+      valid: false,
+      reason: 'Mecánico no encontrado o no está activo'
+    };
+  }
+
+  return { valid: true };
+};
+
+// Validación para evitar duplicados de presupuestos pendientes
+quoteSchema.statics.checkDuplicatePending = async function(clientId, licensePlate) {
+  const existingQuote = await this.findOne({
+    clientId,
+    'vehicle.licensePlate': licensePlate.toUpperCase().replace(/[\s-]/g, ''),
+    status: 'pending',
+    isDeleted: false,
+    validUntil: { $gte: new Date() }
+  });
+
+  return existingQuote;
+};
+
+// Validación de transición de estados
+quoteSchema.methods.canTransitionTo = function(newStatus) {
+  const validTransitions = {
+    'pending': ['approved', 'rejected'],
+    'approved': [], // No se puede cambiar una vez aprobado
+    'rejected': []  // No se puede cambiar una vez rechazado
+  };
+
+  const allowedStatuses = validTransitions[this.status] || [];
+  
+  return {
+    allowed: allowedStatuses.includes(newStatus),
+    reason: !allowedStatuses.includes(newStatus) 
+      ? `No se puede cambiar de ${this.status} a ${newStatus}`
+      : null
+  };
+};
+
 // Populate automático del cliente en queries
 quoteSchema.pre(/^find/, function (next) {
   if (!this.getOptions().skipPopulate) {
-    this.populate(
-      "clientId",
-      "firstName lastName1 lastName2 email phone"
-    ).populate("workOrder.mechanicId");
+    this.populate("clientId", "firstName lastName1 lastName2 email phone")
+        .populate("workOrder.mechanicId")
+        .populate("vehicleId"); // ✅ NUEVO: Popular vehicleId
   }
   next();
 });
-
-
 
 // Hook post-save para enviar notificación cuando workOrder cambia a "listo"
 quoteSchema.post("save", async function (doc, next) {
@@ -662,180 +1006,6 @@ quoteSchema.set("toJSON", {
     return ret;
   },
 });
-
-// 1. Validación de patente única activa por cliente
-quoteSchema.index(
-  { 
-    clientId: 1, 
-    'vehicle.licensePlate': 1,
-    status: 1,
-    isDeleted: 1 
-  }
-);
-
-// 2. Validación antes de guardar
-quoteSchema.pre('save', async function(next) {
-  // Validar que el cliente existe
-  if (this.isModified('clientId')) {
-    const Client = mongoose.model('Client');
-    const client = await Client.findOne({
-      _id: this.clientId,
-      isDeleted: false
-    });
-    
-    if (!client) {
-      const error = new Error('Cliente no encontrado o eliminado');
-      error.name = 'ValidationError';
-      return next(error);
-    }
-  }
-
-  // Validar que la fecha de validez sea futura
-  if (this.isModified('validUntil') && this.validUntil < new Date()) {
-    const error = new Error('La fecha de validez debe ser futura');
-    error.name = 'ValidationError';
-    return next(error);
-  }
-
-  // Validar que no se puede cambiar a aprobado si ya expiró
-  if (this.isModified('status') && this.status === 'approved') {
-    if (this.validUntil < new Date()) {
-      const error = new Error('No se puede aprobar un presupuesto expirado');
-      error.name = 'ValidationError';
-      return next(error);
-    }
-  }
-
-  // Validar costo estimado positivo
-  if (this.isModified('estimatedCost') && this.estimatedCost < 0) {
-    const error = new Error('El costo estimado debe ser mayor o igual a 0');
-    error.name = 'ValidationError';
-    return next(error);
-  }
-
-  // Validar año del vehículo
-  if (this.isModified('vehicle.year')) {
-    const currentYear = new Date().getFullYear();
-    if (this.vehicle.year < 1950 || this.vehicle.year > currentYear + 1) {
-      const error = new Error(`Año del vehículo debe estar entre 1950 y ${currentYear + 1}`);
-      error.name = 'ValidationError';
-      return next(error);
-    }
-  }
-
-  // Validar patente (formato chileno básico)
-  if (this.isModified('vehicle.licensePlate')) {
-    const plate = this.vehicle.licensePlate.toUpperCase().replace(/[\s-]/g, '');
-    
-    // Formato antiguo: ABCD12 (4 letras + 2 números)
-    // Formato nuevo: ABCD12 o AB1234 (variaciones)
-    const isValidFormat = /^[A-Z]{2,4}\d{2,4}$/.test(plate);
-    
-    if (!isValidFormat) {
-      const error = new Error('Formato de patente inválido');
-      error.name = 'ValidationError';
-      return next(error);
-    }
-
-    this.vehicle.licensePlate = plate; // Normalizar
-  }
-
-  // Validar kilometraje
-  if (this.isModified('vehicle.mileage') && this.vehicle.mileage < 0) {
-    const error = new Error('El kilometraje no puede ser negativo');
-    error.name = 'ValidationError';
-    return next(error);
-  }
-
-  next();
-});
-
-// 3. Validación para evitar duplicados de presupuestos pendientes
-quoteSchema.statics.checkDuplicatePending = async function(clientId, licensePlate) {
-  const existingQuote = await this.findOne({
-    clientId,
-    'vehicle.licensePlate': licensePlate.toUpperCase().replace(/[\s-]/g, ''),
-    status: 'pending',
-    isDeleted: false,
-    validUntil: { $gte: new Date() }
-  });
-
-  return existingQuote;
-};
-
-// 4. Validación de transición de estados
-quoteSchema.methods.canTransitionTo = function(newStatus) {
-  const validTransitions = {
-    'pending': ['approved', 'rejected'],
-    'approved': [], // No se puede cambiar una vez aprobado
-    'rejected': []  // No se puede cambiar una vez rechazado
-  };
-
-  const allowedStatuses = validTransitions[this.status] || [];
-  
-  return {
-    allowed: allowedStatuses.includes(newStatus),
-    reason: !allowedStatuses.includes(newStatus) 
-      ? `No se puede cambiar de ${this.status} a ${newStatus}`
-      : null
-  };
-};
-
-// 5. Validación del workOrder
-quoteSchema.pre('save', function(next) {
-  // Si hay workOrder, validar sus campos
-  if (this.workOrder) {
-    // Validar costo final si existe
-    if (this.workOrder.finalCost !== undefined && this.workOrder.finalCost < 0) {
-      const error = new Error('El costo final debe ser mayor o igual a 0');
-      error.name = 'ValidationError';
-      return next(error);
-    }
-
-    // Validar que tenga mecánico si está en progreso
-    if (this.workOrder.status === 'en_progreso' && !this.workOrder.mechanicId) {
-      const error = new Error('Debe asignar un mecánico antes de iniciar el trabajo');
-      error.name = 'ValidationError';
-      return next(error);
-    }
-
-    // Validar fecha estimada de entrega
-    if (this.workOrder.estimatedDelivery && this.workOrder.estimatedDelivery < new Date()) {
-      const error = new Error('La fecha estimada de entrega debe ser futura');
-      error.name = 'ValidationError';
-      return next(error);
-    }
-
-    // Validar que la fecha real de entrega no sea futura
-    if (this.workOrder.actualDelivery && this.workOrder.actualDelivery > new Date()) {
-      const error = new Error('La fecha real de entrega no puede ser futura');
-      error.name = 'ValidationError';
-      return next(error);
-    }
-  }
-
-  next();
-});
-
-// 6. Método para validar mecánico antes de asignar
-quoteSchema.methods.validateMechanicAssignment = async function(mechanicId) {
-  const Mechanic = mongoose.model('Mechanic');
-  
-  const mechanic = await Mechanic.findOne({
-    _id: mechanicId,
-    isDeleted: false,
-    isActive: true
-  });
-
-  if (!mechanic) {
-    return {
-      valid: false,
-      reason: 'Mecánico no encontrado o no está activo'
-    };
-  }
-
-  return { valid: true };
-};
 
 const Quote = mongoose.model("Quote", quoteSchema);
 

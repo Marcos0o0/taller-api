@@ -296,6 +296,66 @@ const updateVehicle = asyncHandler(async (req, res) => {
   });
 });
 
+
+/**
+ * Listar vehículos con filtro por cliente
+ */
+exports.getVehicles = async (req, res) => {
+  try {
+    const { 
+      cliente, // ✅ NUEVO: Filtro por cliente
+      page = 1, 
+      limit = 10,
+      search 
+    } = req.query;
+
+    // Construir filtro
+    const filter = { isActive: true };
+    
+    // ✅ NUEVO: Filtrar por cliente
+    if (cliente) {
+      filter.cliente = cliente;
+    }
+
+    // Búsqueda por patente o marca/modelo
+    if (search) {
+      filter.$or = [
+        { patente: { $regex: search, $options: 'i' } },
+        { marca: { $regex: search, $options: 'i' } },
+        { modelo: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const vehicles = await Vehicle.find(filter)
+      .populate('cliente', 'firstName lastName1 lastName2 phone')
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit))
+      .sort({ createdAt: -1 });
+
+    const total = await Vehicle.countDocuments(filter);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        vehicles,
+        pagination: {
+          total,
+          page: Number(page),
+          limit: Number(limit),
+          pages: Math.ceil(total / Number(limit)),
+        },
+      },
+    });
+
+  } catch (error) {
+    console.error('Error fetching vehicles:', error);
+    res.status(500).json({
+      success: false,
+      error: { message: 'Error al obtener vehículos' },
+    });
+  }
+};
+
 // @desc    Actualizar kilometraje
 // @route   PUT /api/vehicles/:id/kilometraje
 // @access  Admin/Mechanic
