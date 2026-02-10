@@ -25,18 +25,17 @@ const io = socketIO(server, {
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
-    
+
     if (!token) {
       return next(new Error('No token provided'));
     }
-    
-    // Verificar token JWT
+
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
     socket.userId = decoded.id;
     socket.userRole = decoded.role;
-    
+
     next();
   } catch (error) {
     console.error('Socket auth error:', error);
@@ -44,51 +43,48 @@ io.use(async (socket, next) => {
   }
 });
 
+// ✅ Configurar alertService con io (una sola vez, fuera del bloque connection)
+const alertService = require('./services/alertService');
+alertService.setIO(io);
+alertService.iniciarMonitoreo(30); // verificar alertas cada 30 minutos
+
 // ✅ Manejo de conexiones WebSocket
 io.on('connection', (socket) => {
   console.log(`✅ Cliente conectado: ${socket.id} (User: ${socket.userId})`);
 
-  const alertService = require('./services/alertService');
-  alertService.setIO(io);  // ✅ Inyectar io sin ciclo circular
-  
-  // También inicia el monitoreo automático:
-  alertService.iniciarMonitoreo(30); // cada 30 minutos
-  
   // Unir a sala de alertas
   socket.join('alerts');
-  
-  // Enviar estadísticas iniciales
-  const alertService = require('./services/alertService');
-  alertService.obtenerEstadisticas().then((stats) => {
-    socket.emit('alertas-actualizadas', stats);
-  }).catch(err => {
-    console.error('Error obteniendo estadísticas iniciales:', err);
-  });
-  
-  // Escuchar solicitud de actualización
+
+  // Enviar estadísticas iniciales al cliente que se conecta
+  alertService.obtenerEstadisticas()
+    .then((stats) => {
+      socket.emit('alertas-actualizadas', stats);
+    })
+    .catch((err) => {
+      console.error('Error obteniendo estadísticas iniciales:', err);
+    });
+
+  // Escuchar solicitud de alertas
   socket.on('solicitar-alertas', async (filters) => {
     try {
       const Alert = require('./models/Alert');
       const alerts = await Alert.find(filters || { estado: 'activa' })
-        .populate('producto')
+        .populate('repuesto')
         .limit(10)
         .sort('-fechaCreacion');
-      
+
       socket.emit('alertas-enviadas', alerts);
     } catch (error) {
       console.error('Error enviando alertas:', error);
       socket.emit('error', { message: 'Error al obtener alertas' });
     }
   });
-  
+
   // Desconexión
   socket.on('disconnect', () => {
     console.log(`❌ Cliente desconectado: ${socket.id}`);
   });
 });
-
-// ✅ Exportar io para usar en alertService
-module.exports.io = io;
 
 // Middlewares de seguridad
 app.use(helmet());
@@ -96,7 +92,7 @@ app.use(helmet());
 // CORS
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
-  credentials: true
+  credentials: true,
 }));
 
 // Request ID único
@@ -118,7 +114,7 @@ if (process.env.NODE_ENV === 'development') {
 app.get('/health', async (req, res) => {
   const mongoose = require('mongoose');
   const { getRedisClient } = require('./config/redis');
-  
+
   const health = {
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -126,11 +122,11 @@ app.get('/health', async (req, res) => {
     services: {
       mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
       redis: 'unknown',
-      websocket: io.engine.clientsCount >= 0 ? 'active' : 'inactive'
+      websocket: io.engine.clientsCount >= 0 ? 'active' : 'inactive',
     },
     connections: {
-      websocket: io.engine.clientsCount || 0
-    }
+      websocket: io.engine.clientsCount || 0,
+    },
   };
 
   const redisClient = getRedisClient();
@@ -159,7 +155,7 @@ app.use('/api/mechanics', require('./routes/mechanicRoutes'));
 app.use('/api/dashboard', require('./routes/dashboardRoutes'));
 app.use('/api/inventory', require('./routes/inventoryRoutes'));
 app.use('/api/vehicles', require('./routes/vehicleRoutes'));
-app.use('/api/alerts', require('./routes/alertsRoutes')); // ✅ Nueva ruta de alertas
+app.use('/api/alerts', require('./routes/alertsRoutes'));
 
 // Ruta raíz
 app.get('/', (req, res) => {
@@ -169,7 +165,7 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     websocket: {
       connected: io.engine.clientsCount || 0,
-      status: 'active'
+      status: 'active',
     },
     endpoints: {
       health: '/health',
@@ -180,7 +176,7 @@ app.get('/', (req, res) => {
       mechanics: '/api/mechanics',
       inventory: '/api/inventory',
       alerts: '/api/alerts',
-    }
+    },
   });
 });
 
@@ -190,5 +186,5 @@ app.use(notFound);
 // Manejo global de errores
 app.use(errorHandler);
 
-// ✅ Exportar tanto app como server
+// ✅ Exportar app, server e io
 module.exports = { app, server, io };
