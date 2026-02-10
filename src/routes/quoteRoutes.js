@@ -15,6 +15,8 @@ const {
   approveQuoteManual,
   rejectQuoteManual,
   deleteQuote,
+  addAbono,
+  removeAbono,
 } = require("../controllers/quoteController");
 
 // Rutas públicas (con token de aprobación)
@@ -91,6 +93,21 @@ const idValidation = [
   param("id").isMongoId().withMessage("ID de presupuesto inválido"),
 ];
 
+
+const abonoValidation = [
+  body("amount")
+    .isFloat({ min: 0.01 })
+    .withMessage("El monto debe ser mayor a 0"),
+  body("method")
+    .isIn(['cash', 'transfer', 'credit_card', 'debit_card', 'check'])
+    .withMessage("Método de pago inválido"),
+  body("notes")
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage("Las notas no pueden exceder 500 caracteres"),
+];
+
 // Rutas protegidas - Admin
 router.use(authenticate, authorize("admin"));
 
@@ -102,8 +119,7 @@ router.post("/:id/send-email", idValidation, validate, sendQuoteEmail);
 router.put("/:id/approve", idValidation, validate, approveQuoteManual);
 router.put("/:id/reject", idValidation, validate, rejectQuoteManual);
 router.delete("/:id", idValidation, validate, deleteQuote);
-router.post('/:id/abonos', protect, quotesController.addAbono);
-router.delete('/:id/abonos/:abonoIndex', protect, quotesController.removeAbono);
-
+router.post('/:id/abonos', idValidation, abonoValidation, validate, addAbono);
+router.delete('/:id/abonos/:abonoIndex', idValidation, validate, removeAbono);
 
 module.exports = router;
