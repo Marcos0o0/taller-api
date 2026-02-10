@@ -47,6 +47,12 @@ io.use(async (socket, next) => {
 // ✅ Manejo de conexiones WebSocket
 io.on('connection', (socket) => {
   console.log(`✅ Cliente conectado: ${socket.id} (User: ${socket.userId})`);
+
+  const alertService = require('./services/alertService');
+  alertService.setIO(io);  // ✅ Inyectar io sin ciclo circular
+  
+  // También inicia el monitoreo automático:
+  alertService.iniciarMonitoreo(30); // cada 30 minutos
   
   // Unir a sala de alertas
   socket.join('alerts');
