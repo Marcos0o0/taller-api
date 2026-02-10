@@ -1,8 +1,8 @@
 // controllers/dashboardController.js
-const Quote = require('../models/Quote.model');
+const Quote = require('../models/Quote');
 const Product = require('../models/Product');
 const Alert = require('../models/Alert');
-const User = require('../models/User.model');
+const User = require('../models/User');
 const { asyncHandler } = require('../middlewares/errorHandler');
 
 /**
