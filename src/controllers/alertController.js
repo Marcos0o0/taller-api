@@ -26,8 +26,8 @@ exports.listAlerts = asyncHandler(async (req, res) => {
   
   const [alertas, total] = await Promise.all([
     Alert.find(query)
-      .populate('repuesto', 'codigo nombre categoria stock')
-      .populate('resueltoPor', 'nombre email')
+      .populate('repuesto', 'barcode name category stock minStock price location supplier')
+      .populate('resueltoPor', 'username email role')
       .sort(sort)
       .limit(parseInt(limit))
       .skip(skip)
