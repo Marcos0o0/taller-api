@@ -158,6 +158,7 @@ app.use('/api/dashboard', require('./routes/dashboardRoutes'));
 app.use('/api/inventory', require('./routes/inventoryRoutes'));
 app.use('/api/vehicles', require('./routes/vehicleRoutes'));
 app.use('/api/alerts', require('./routes/alertsRoutes'));
+app.use('/api/vehicle-images', require('./routes/vehicleImagesRoutes'));
 
 // Ruta raíz
 app.get('/', (req, res) => {
@@ -178,7 +179,8 @@ app.get('/', (req, res) => {
       mechanics: '/api/mechanics',
       inventory: '/api/inventory',
       alerts: '/api/alerts',
-      appVersion: '/api/app-version.json', // ✅ Nuevo endpoint
+      appVersion: '/api/app-version.json',
+      vehicleImages: '/api/vehicle-images',
     },
   });
 });
