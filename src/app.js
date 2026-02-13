@@ -145,7 +145,9 @@ app.get('/health', async (req, res) => {
   res.status(statusCode).json(health);
 });
 
-// API Routes
+app.use('/api', require('./routes/appVersionRoutes'));
+
+// API Routes (con autenticación)
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/clients', require('./routes/clientRoutes'));
@@ -176,6 +178,7 @@ app.get('/', (req, res) => {
       mechanics: '/api/mechanics',
       inventory: '/api/inventory',
       alerts: '/api/alerts',
+      appVersion: '/api/app-version.json', // ✅ Nuevo endpoint
     },
   });
 });
