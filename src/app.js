@@ -20,6 +20,7 @@ const io = socketIO(server, {
   },
   transports: ['websocket', 'polling'],
 });
+app.set('io', io);
 
 // ✅ Middleware de autenticación para WebSocket
 io.use(async (socket, next) => {
