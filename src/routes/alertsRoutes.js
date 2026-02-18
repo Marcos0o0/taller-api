@@ -10,6 +10,7 @@ const {
   forceAlertCheck,
 } = require('../controllers/alertController');
 const { authenticate, authorize } = require('../middlewares/auth');
+const { sendAlertPushNotification } = require('../services/pushService'); // ✅ NUEVO
 
 // Todas las rutas requieren autenticación
 router.use(authenticate);
@@ -23,17 +24,17 @@ router.get('/stats', authorize('admin', 'gerente'), getAlertStats);
 // Forzar verificación
 router.post('/check', authorize('admin'), forceAlertCheck);
 
-// ✅ NUEVA RUTA: Test de notificaciones (TEMPORAL - Solo desarrollo)
-router.post('/test', authorize('admin', 'gerente'), (req, res) => {
+// ✅ RUTA DE TEST CON PUSH NOTIFICATION
+router.post('/test', authorize('admin', 'gerente'), async (req, res) => { // ✅ async
   try {
-    console.log('[TEST] Endpoint /api/alerts/test llamado');
+    console.log('🧪 [TEST] Endpoint /api/alerts/test llamado');
     
     // Crear alerta de prueba
     const alertaTest = {
       _id: 'test-' + Date.now(),
       tipo: 'stock_bajo',
       severidad: 'alta',
-      titulo: 'Test desde Backend',
+      titulo: '🧪 Test desde Backend',
       mensaje: 'Esta alerta fue generada desde el endpoint /api/alerts/test para verificar que las notificaciones funcionan correctamente',
       repuesto: {
         _id: 'repuesto-test-123',
@@ -50,14 +51,11 @@ router.post('/test', authorize('admin', 'gerente'), (req, res) => {
       fechaCreacion: new Date(),
     };
 
-    // Emitir por WebSocket
-    console.log('[TEST] Emitiendo alerta por WebSocket...');
-    
-    // Obtener io desde req.app (asegúrate que esté disponible)
+    // Obtener io desde req.app
     const io = req.app.get('io');
     
     if (!io) {
-      console.error('[TEST] Socket.io no está disponible en req.app');
+      console.error('❌ [TEST] Socket.io no está disponible en req.app');
       return res.status(500).json({ 
         success: false, 
         error: 'Socket.io no configurado',
@@ -65,23 +63,31 @@ router.post('/test', authorize('admin', 'gerente'), (req, res) => {
       });
     }
     
+    // 1. Emitir por WebSocket (para apps abiertas)
+    console.log('📡 [TEST] Emitiendo alerta por WebSocket...');
     io.emit('nueva-alerta', alertaTest);
-    console.log('[TEST] Alerta emitida por WebSocket');
-    console.log('[TEST] Clientes conectados:', io.engine.clientsCount);
+    console.log('✅ [TEST] Alerta emitida por WebSocket');
+    console.log('📊 [TEST] Clientes conectados:', io.engine.clientsCount);
+    
+    // 2. ✅ Enviar Push Notification (para apps cerradas)
+    console.log('📱 [TEST] Enviando push notification...');
+    await sendAlertPushNotification(alertaTest);
+    console.log('✅ [TEST] Push notification enviada');
     
     res.json({ 
       success: true, 
-      message: 'Alerta de prueba enviada por WebSocket',
+      message: 'Alerta de prueba enviada por WebSocket y Push Notification',
       alerta: alertaTest,
       clientesConectados: io.engine.clientsCount,
-      note: 'Revisa el frontend - la notificación debería aparecer en 1-2 segundos'
+      note: 'Revisa tu teléfono - la notificación debería aparecer incluso con la app cerrada'
     });
     
   } catch (error) {
-    console.error('[TEST] Error en endpoint de prueba:', error);
+    console.error('❌ [TEST] Error en endpoint de prueba:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
