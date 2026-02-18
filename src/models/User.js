@@ -48,6 +48,11 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null
+  },
+  // ✅ NUEVO: Token FCM para push notifications
+  fcmToken: {
+    type: String,
+    default: null
   }
 }, { 
   timestamps: true 
@@ -81,7 +86,6 @@ userSchema.methods.isLocked = function() {
 
 // Incrementar intentos de login fallidos
 userSchema.methods.incLoginAttempts = async function() {
-  // Si ya pasó el tiempo de bloqueo, resetear
   if (this.lockUntil && this.lockUntil < Date.now()) {
     await this.updateOne({
       $set: { loginAttempts: 1 },
@@ -92,7 +96,6 @@ userSchema.methods.incLoginAttempts = async function() {
   
   const updates = { $inc: { loginAttempts: 1 } };
   
-  // Bloquear después de 5 intentos por 15 minutos
   if (this.loginAttempts + 1 >= 5 && !this.isLocked()) {
     updates.$set = { lockUntil: Date.now() + 15 * 60 * 1000 };
   }
@@ -108,7 +111,7 @@ userSchema.methods.resetLoginAttempts = async function() {
   });
 };
 
-// No retornar password y refreshToken en JSON
+// No retornar datos sensibles en JSON
 userSchema.set('toJSON', {
   transform: (doc, ret) => {
     delete ret.password;
@@ -116,6 +119,7 @@ userSchema.set('toJSON', {
     delete ret.tokenExpiration;
     delete ret.loginAttempts;
     delete ret.lockUntil;
+    delete ret.fcmToken; // ✅ No exponer el token FCM
     if (ret.isDeleted) {
       delete ret.deletedBy;
     }

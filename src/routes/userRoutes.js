@@ -3,6 +3,7 @@ const router = express.Router();
 const { body, param } = require('express-validator');
 const { authenticate, authorize } = require('../middlewares/auth');
 const validate = require('../middlewares/validator');
+const User = require('../models/User');
 const {
   listUsers,
   getUser,
@@ -13,7 +14,39 @@ const {
   deleteUser
 } = require('../controllers/userController');
 
-// Todas las rutas requieren admin
+// ✅ NUEVA RUTA: Guardar token FCM (cualquier usuario autenticado)
+// IMPORTANTE: Va ANTES del middleware authorize('admin')
+router.post('/fcm-token', authenticate, async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+    const userId = req.user.id || req.user._id;
+
+    if (!fcmToken) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Token FCM requerido' 
+      });
+    }
+
+    await User.findByIdAndUpdate(userId, { fcmToken });
+
+    console.log(`✅ Token FCM guardado para usuario: ${req.user.username}`);
+
+    res.json({ 
+      success: true, 
+      message: 'Token FCM guardado correctamente' 
+    });
+
+  } catch (error) {
+    console.error('❌ Error guardando token FCM:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Todas las rutas de abajo requieren admin
 router.use(authenticate, authorize('admin'));
 
 // Validaciones
@@ -59,7 +92,7 @@ const idValidation = [
     .withMessage('ID de usuario inválido')
 ];
 
-// Rutas
+// Rutas admin
 router.get('/', listUsers);
 router.get('/:id', idValidation, validate, getUser);
 router.post('/', createUserValidation, validate, createUser);

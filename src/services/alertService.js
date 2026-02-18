@@ -2,6 +2,7 @@
 const Alert = require('../models/Alert');
 const Product = require('../models/Product');
 const emailService = require('./emailService');
+const { sendAlertPushNotification } = require('./pushService'); // ✅ NUEVO
 
 // ✅ NO importar io aquí — se inyecta con setIO() para evitar ciclo circular
 let io = null;
@@ -79,7 +80,6 @@ class AlertService {
       let alertasCreadas = 0;
 
       for (const producto of productosStockBajo) {
-        // ✅ Usar 'repuesto' que es el campo definido en el modelo Alert
         const existente = await Alert.findOne({
           repuesto: producto._id,
           tipo: 'stock_bajo',
@@ -90,7 +90,7 @@ class AlertService {
           const alerta = await Alert.create({
             tipo: 'stock_bajo',
             severidad: 'alta',
-            repuesto: producto._id,   // ✅ campo correcto
+            repuesto: producto._id,
             titulo: `⚠️ Stock Bajo: ${producto.name}`,
             mensaje: `El producto ${producto.barcode || producto.name} tiene stock bajo. Stock actual: ${producto.stock}, Stock mínimo: ${producto.minStock}`,
             datos: {
@@ -127,7 +127,7 @@ class AlertService {
 
       for (const producto of productosAgotados) {
         const existente = await Alert.findOne({
-          repuesto: producto._id,   // ✅ campo correcto
+          repuesto: producto._id,
           tipo: 'stock_agotado',
           estado: 'activa',
         });
@@ -136,7 +136,7 @@ class AlertService {
           const alerta = await Alert.create({
             tipo: 'stock_agotado',
             severidad: 'critica',
-            repuesto: producto._id,   // ✅ campo correcto
+            repuesto: producto._id,
             titulo: `🚨 Stock AGOTADO: ${producto.name}`,
             mensaje: `El producto ${producto.barcode || producto.name} está completamente agotado. Se requiere reabastecimiento urgente.`,
             datos: {
@@ -179,7 +179,7 @@ class AlertService {
 
         if (movimientosRecientes.length >= 10) {
           const existente = await Alert.findOne({
-            repuesto: producto._id,   // ✅ campo correcto
+            repuesto: producto._id,
             tipo: 'movimiento_inusual',
             estado: 'activa',
             fechaCreacion: { $gte: hace24h },
@@ -189,7 +189,7 @@ class AlertService {
             await Alert.create({
               tipo: 'movimiento_inusual',
               severidad: 'media',
-              repuesto: producto._id,   // ✅ campo correcto
+              repuesto: producto._id,
               titulo: `📊 Actividad inusual: ${producto.name}`,
               mensaje: `El producto ${producto.barcode || producto.name} ha tenido ${movimientosRecientes.length} movimientos en las últimas 24 horas.`,
               datos: {
@@ -211,12 +211,13 @@ class AlertService {
   }
 
   /**
-   * Enviar notificaciones de alerta
+   * ✅ Enviar notificaciones de alerta (EMAIL + WEBSOCKET + PUSH)
    */
   async enviarNotificaciones(alerta) {
     try {
       await alerta.populate('repuesto');
 
+      // 1. Email (solo alta/crítica)
       if (alerta.severidad === 'alta' || alerta.severidad === 'critica') {
         const adminEmails = process.env.ADMIN_EMAILS?.split(',') || [];
 
@@ -236,7 +237,13 @@ class AlertService {
         }
       }
 
+      // 2. WebSocket (app abierta/minimizada)
       this.emitirAlerta(alerta);
+
+      // 3. ✅ Push Notification Firebase (app cerrada)
+      console.log('📱 Enviando push notification...');
+      await sendAlertPushNotification(alerta);
+
     } catch (error) {
       console.error('Error enviando notificaciones:', error);
     }
@@ -340,7 +347,7 @@ class AlertService {
       let resueltas = 0;
 
       for (const alerta of alertasStockBajo) {
-        const producto = alerta.repuesto; // ✅ campo correcto
+        const producto = alerta.repuesto;
 
         if (producto && producto.stock > producto.minStock) {
           alerta.estado = 'resuelta';
