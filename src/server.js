@@ -4,6 +4,7 @@ const { connectDB, disconnectDB } = require('./config/database');
 const { connectRedis, disconnectRedis } = require('./config/redis');
 const emailService = require('./services/emailService');
 const alertService = require('./services/alertService');
+const { initializeFirebase } = require('./config/firebase');
 
 const PORT = process.env.PORT || 3000;
 
@@ -21,6 +22,8 @@ const startServer = async () => {
     } catch (error) {
       console.warn('⚠️ Redis no disponible. El sistema funcionará sin caché:', error.message);
     }
+
+    initializeFirebase();
 
     // Inicializar servicio de email
     try {
