@@ -63,6 +63,8 @@ const sendAlertPushNotification = async (alerta) => {
           priority: alerta.severidad === 'critica' ? 'max' : 'high',
           defaultSound: true,
           defaultVibrateTimings: true,
+          icon: 'ic_stat_icon_config_sample', // ✅ Icono de notificación
+          color: '#1890ff', // ✅ Color azul
         },
       },
       // Enviar a múltiples tokens
