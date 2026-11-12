@@ -44,7 +44,7 @@ const listVehicles = asyncHandler(async (req, res) => {
 
   const [vehicles, total] = await Promise.all([
     Vehicle.find(query)
-      .populate('cliente', 'rut name email phone')
+      .populate('cliente', 'rut name firstName lastName1 lastName2 email phone')
       .sort(sort)
       .limit(parseInt(limit))
       .skip(skip)
@@ -73,7 +73,7 @@ const getVehicle = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const vehicle = await Vehicle.findById(id)
-    .populate('cliente', 'rut name email phone address')
+    .populate('cliente', 'rut name firstName lastName1 lastName2 email phone address')
     .populate('historialKilometraje.registradoPor', 'username');
 
   if (!vehicle) {
@@ -101,7 +101,7 @@ const getVehicleByPatente = asyncHandler(async (req, res) => {
   const vehicle = await Vehicle.findOne({
     patente: patente.toUpperCase(),
     isDeleted: false
-  }).populate('cliente', 'rut name email phone');
+  }).populate('cliente', 'rut name firstName lastName1 lastName2 email phone');
 
   if (!vehicle) {
     return res.status(404).json({
@@ -225,7 +225,7 @@ const createVehicle = asyncHandler(async (req, res) => {
   }
 
   // Poblar información del cliente
-  await vehicle.populate('cliente', 'rut name email phone');
+  await vehicle.populate('cliente', 'rut name firstName lastName1 lastName2 email phone');
 
   res.status(201).json({
     success: true,
@@ -287,7 +287,7 @@ const updateVehicle = asyncHandler(async (req, res) => {
   if (isActive !== undefined) vehicle.isActive = isActive;
 
   await vehicle.save();
-  await vehicle.populate('cliente', 'rut name email phone');
+  await vehicle.populate('cliente', 'rut name firstName lastName1 lastName2 email phone');
 
   res.json({
     success: true,
@@ -470,7 +470,7 @@ const restoreVehicle = asyncHandler(async (req, res) => {
   }
 
   await vehicle.restore();
-  await vehicle.populate('cliente', 'rut name email phone');
+  await vehicle.populate('cliente', 'rut name firstName lastName1 lastName2 email phone');
 
   res.json({
     success: true,
