@@ -100,7 +100,7 @@ const login = asyncHandler(async (req, res) => {
   if (!isValidPassword) {
     // Incrementar intentos fallidos
     await user.incLoginAttempts();
-    console.warn(`Login fallido - Contraseña inválida: ${username} - Intentos: ${user.loginAttempts + 1}`);
+    console.warn(`Login fallido - Contraseña inválida: ${username} - Intentos: ${user.loginAttempts}`);
 
     return res.status(401).json({
       success: false,
@@ -109,6 +109,10 @@ const login = asyncHandler(async (req, res) => {
         message: 'Credenciales inválidas'
       }
     });
+  }
+
+  if (user.role !== 'admin') {
+    return res.status(403).json({ success: false, error: { code: 'OWNER_ONLY', message: 'El acceso al taller corresponde al propietario.' } });
   }
 
   // Resetear intentos fallidos
@@ -162,7 +166,7 @@ const refresh = asyncHandler(async (req, res) => {
     // Buscar usuario
     const user = await User.findById(decoded.userId);
 
-    if (!user || user.isDeleted) {
+    if (!user || user.isDeleted || user.role !== 'admin') {
       return res.status(401).json({
         success: false,
         error: {

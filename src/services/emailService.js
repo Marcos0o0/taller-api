@@ -1,5 +1,7 @@
 const nodemailer = require("nodemailer");
 
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+
 class EmailService {
   constructor() {
     this.transporter = null;
@@ -351,7 +353,7 @@ getEmailTemplate(content) {
     
     // 📱 Generar enlace de WhatsApp
     const whatsappMessage = encodeURIComponent(
-      `Hola, me gustaría consultar sobre el presupuesto ${quote.quoteNumber} para mi vehículo ${quote.vehicle.brand} ${quote.vehicle.model}, patente ${quote.vehicle.licensePlate}.`
+      `Hola, me gustaría consultar sobre el presupuesto ${quote.quoteNumber} para mi vehículo ${escapeHtml(quote.vehicle?.brand || 'Por completar')} ${escapeHtml(quote.vehicle?.model || 'Por completar')}, patente ${escapeHtml(quote.vehicle?.licensePlate || 'Por completar')}.`
     );
     const whatsappUrl = `https://wa.me/${this.workshopInfo.phone.replace(/[^0-9]/g, '')}?text=${whatsappMessage}`;
 
@@ -368,7 +370,7 @@ getEmailTemplate(content) {
     
     <div class="content">
       <div class="greeting">
-        Estimado/a <strong>${client.getFullName()}</strong>,
+        Estimado/a <strong>${escapeHtml(client.getFullName())}</strong>,
       </div>
       
       <p style="margin-bottom: 25px; font-size: 15px; color: ${this.brandColors.textLight};">
@@ -392,23 +394,23 @@ getEmailTemplate(content) {
         <div class="info-card">
           <div class="info-row">
             <div class="info-label">Marca:</div>
-            <div class="info-value"><strong>${quote.vehicle.brand}</strong></div>
+            <div class="info-value"><strong>${escapeHtml(quote.vehicle?.brand || 'Por completar')}</strong></div>
           </div>
           <div class="info-row">
             <div class="info-label">Modelo:</div>
-            <div class="info-value"><strong>${quote.vehicle.model}</strong></div>
+            <div class="info-value"><strong>${escapeHtml(quote.vehicle?.model || 'Por completar')}</strong></div>
           </div>
           <div class="info-row">
             <div class="info-label">Año:</div>
-            <div class="info-value">${quote.vehicle.year}</div>
+            <div class="info-value">${escapeHtml(quote.vehicle?.year || 'Por completar')}</div>
           </div>
           <div class="info-row">
             <div class="info-label">Patente:</div>
-            <div class="info-value"><strong>${quote.vehicle.licensePlate}</strong></div>
+            <div class="info-value"><strong>${escapeHtml(quote.vehicle?.licensePlate || 'Por completar')}</strong></div>
           </div>
           <div class="info-row">
             <div class="info-label">Kilometraje:</div>
-            <div class="info-value">${quote.vehicle.mileage.toLocaleString('es-CL')} km</div>
+            <div class="info-value">${Number(quote.vehicle?.mileage || 0).toLocaleString('es-CL')} km</div>
           </div>
         </div>
       </div>
@@ -417,7 +419,7 @@ getEmailTemplate(content) {
       <div class="section">
         <div class="section-title">🔧 Descripción del Problema</div>
         <div class="description-box">
-          ${quote.description}
+          ${escapeHtml(quote.description)}
         </div>
       </div>
       
@@ -425,7 +427,7 @@ getEmailTemplate(content) {
       <div class="section">
         <div class="section-title">📋 Trabajos Propuestos</div>
         <div class="description-box">
-          ${quote.proposedWork.replace(/\n/g, '<br>')}
+          ${escapeHtml(quote.proposedWork).replace(/\n/g, '<br>')}
         </div>
       </div>
       
@@ -512,7 +514,7 @@ getEmailTemplate(content) {
     
     // 📱 Generar enlace de WhatsApp
     const whatsappMessage = encodeURIComponent(
-      `Hola, quisiera coordinar el retiro de mi vehículo. Orden de trabajo: ${order.orderNumber}, Patente: ${quote.vehicle.licensePlate}`
+      `Hola, quisiera coordinar el retiro de mi vehículo. Orden de trabajo: ${order.orderNumber}, Patente: ${escapeHtml(quote.vehicle?.licensePlate || 'Por completar')}`
     );
     const whatsappUrl = `https://wa.me/${this.workshopInfo.phone.replace(/[^0-9]/g, '')}?text=${whatsappMessage}`;
 
@@ -524,7 +526,7 @@ getEmailTemplate(content) {
     
     <div class="content">
       <div class="greeting">
-        Estimado/a <strong>${client.getFullName()}</strong>,
+        Estimado/a <strong>${escapeHtml(client.getFullName())}</strong>,
       </div>
       
       <div style="background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); padding: 30px; border-radius: 12px; text-align: center; margin: 30px 0; border: 3px solid ${this.brandColors.success};">
@@ -553,15 +555,15 @@ getEmailTemplate(content) {
         <div class="info-card">
           <div class="info-row">
             <div class="info-label">Marca y Modelo:</div>
-            <div class="info-value"><strong>${quote.vehicle.brand} ${quote.vehicle.model}</strong></div>
+            <div class="info-value"><strong>${escapeHtml(quote.vehicle?.brand || 'Por completar')} ${escapeHtml(quote.vehicle?.model || 'Por completar')}</strong></div>
           </div>
           <div class="info-row">
             <div class="info-label">Patente:</div>
-            <div class="info-value"><strong>${quote.vehicle.licensePlate}</strong></div>
+            <div class="info-value"><strong>${escapeHtml(quote.vehicle?.licensePlate || 'Por completar')}</strong></div>
           </div>
           <div class="info-row">
             <div class="info-label">Año:</div>
-            <div class="info-value">${quote.vehicle.year}</div>
+            <div class="info-value">${escapeHtml(quote.vehicle?.year || 'Por completar')}</div>
           </div>
         </div>
       </div>

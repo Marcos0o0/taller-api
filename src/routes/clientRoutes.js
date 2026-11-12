@@ -17,6 +17,7 @@ router.use(authenticate, authorize('admin'));
 
 // Validaciones
 const createClientValidation = [
+  body('requestId').optional().isUUID(),
   body('firstName')
     .trim()
     .notEmpty()
@@ -24,9 +25,8 @@ const createClientValidation = [
     .isLength({ max: 100 })
     .withMessage('Nombre no puede exceder 100 caracteres'),
   body('lastName1')
+    .optional()
     .trim()
-    .notEmpty()
-    .withMessage('Apellido paterno es obligatorio')
     .isLength({ max: 100 })
     .withMessage('Apellido paterno no puede exceder 100 caracteres'),
   body('lastName2')
@@ -41,9 +41,8 @@ const createClientValidation = [
     .isLength({ min: 9, max: 20 })
     .withMessage('Teléfono debe tener entre 9 y 20 caracteres'),
   body('email')
+    .optional({ checkFalsy: true })
     .trim()
-    .notEmpty()
-    .withMessage('Email es obligatorio')
     .isEmail()
     .withMessage('Email no válido')
 
@@ -60,8 +59,6 @@ const updateClientValidation = [
   body('lastName1')
     .optional()
     .trim()
-    .notEmpty()
-    .withMessage('Apellido paterno no puede estar vacío')
     .isLength({ max: 100 })
     .withMessage('Apellido paterno no puede exceder 100 caracteres'),
   body('lastName2')
@@ -75,7 +72,7 @@ const updateClientValidation = [
     .isLength({ min: 9, max: 20 })
     .withMessage('Teléfono debe tener entre 9 y 20 caracteres'),
   body('email')
-    .optional()
+    .optional({ checkFalsy: true })
     .trim()
     .isEmail()
     .withMessage('Email no válido')

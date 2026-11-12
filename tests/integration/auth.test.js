@@ -1,6 +1,6 @@
 const request = require('supertest');
 const mongoose = require('mongoose');
-const app = require('../../src/app');
+const { app, io } = require('../../src/app');
 const User = require('../../src/models/User');
 
 describe('Auth API Integration Tests', () => {
@@ -20,6 +20,7 @@ describe('Auth API Integration Tests', () => {
   afterAll(async () => {
     await User.deleteMany({});
     await mongoose.connection.close();
+    io.close();
   });
 
   describe('POST /api/auth/login', () => {

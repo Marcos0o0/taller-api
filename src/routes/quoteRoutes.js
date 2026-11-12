@@ -1,125 +1,86 @@
-const express = require("express");
+const express = require('express');
+const { body, param, query } = require('express-validator');
+const { authenticate, authorize } = require('../middlewares/auth');
+const validate = require('../middlewares/validator');
+const { publicLimiter } = require('../middlewares/rateLimiter');
+const controller = require('../controllers/quoteController');
 const router = express.Router();
-const { body, param } = require("express-validator");
-const { authenticate, authorize } = require("../middlewares/auth");
-const validate = require("../middlewares/validator");
-const { publicLimiter } = require("../middlewares/rateLimiter");
-const {
-  listQuotes,
-  getQuote,
-  createQuote,
-  updateQuote,
-  sendQuoteEmail,
-  approveQuote,
-  rejectQuote,
-  approveQuoteManual,
-  rejectQuoteManual,
-  deleteQuote,
-  addAbono,
-  removeAbono,
-} = require("../controllers/quoteController");
 
-// Rutas públicas (con token de aprobación)
-router.get("/:id/approve", publicLimiter, approveQuote);
-router.get("/:id/reject", publicLimiter, rejectQuote);
+router.get('/:id/approve', publicLimiter, controller.approveQuote);
+router.get('/:id/reject', publicLimiter, controller.rejectQuote);
+router.use(authenticate, authorize('admin'));
 
-// Validaciones
-const createQuoteValidation = [
-  body("clientId")
-    .notEmpty()
-    .withMessage("Cliente es obligatorio")
-    .isMongoId()
-    .withMessage("ID de cliente inválido"),
-  body("vehicle.brand")
+const idValidation = [param('id').isMongoId().withMessage('ID de presupuesto inválido')];
+const quoteValidation = [
+  body('clientId').optional().isMongoId().withMessage('Seleccione un cliente válido'),
+  body('vehicle').optional({ nullable: true }).isObject(),
+  body('vehicle.brand').optional({ checkFalsy: true }).isString().trim().isLength({ max: 100 }),
+  body('vehicle.model').optional({ checkFalsy: true }).isString().trim().isLength({ max: 100 }),
+  body('vehicle.year')
+    .optional({ nullable: true })
+    .isInt({ min: 1950, max: new Date().getFullYear() + 1 }),
+  body('vehicle.licensePlate')
+    .optional({ checkFalsy: true })
+    .isString()
     .trim()
-    .notEmpty()
-    .withMessage("Marca del vehículo es obligatoria"),
-  body("vehicle.model")
-    .trim()
-    .notEmpty()
-    .withMessage("Modelo del vehículo es obligatorio"),
-  body("vehicle.year")
-    .isInt({ min: 1950, max: new Date().getFullYear() + 1 })
-    .withMessage("Año del vehículo inválido"),
-  body("vehicle.licensePlate")
-    .trim()
-    .notEmpty()
-    .withMessage("Patente es obligatoria"),
-  body("vehicle.mileage")
-    .optional()
-    .isInt({ min: 0 })
-    .withMessage("Kilometraje debe ser mayor o igual a 0"),
-  body("description")
-    .trim()
-    .isLength({ min: 20, max: 2000 })
-    .withMessage("Descripción debe tener entre 20 y 2000 caracteres"),
-  body("proposedWork")
-    .trim()
-    .isLength({ min: 20, max: 2000 })
-    .withMessage("Trabajo propuesto debe tener entre 20 y 2000 caracteres"),
-  body("estimatedCost")
-    .isFloat({ min: 0 })
-    .withMessage("Costo estimado debe ser mayor o igual a 0"),
-  body("notes")
-    .optional()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage("Notas no pueden exceder 1000 caracteres"),
+    .isLength({ max: 20 }),
+  body('vehicle.mileage').optional({ nullable: true }).isInt({ min: 0 }),
+  body('vehicleId').optional({ nullable: true }).isMongoId(),
+  body('description').optional().isString().trim().isLength({ max: 2000 }),
+  body('proposedWork').optional().isString().isLength({ max: 500000 }),
+  body('notes').optional().isString().trim().isLength({ max: 1000 }),
+  body('includeIVA').optional().isBoolean(),
+  body('estimatedCost').optional().isInt({ min: 0 }),
+  body('items').optional().isArray({ min: 1, max: 500 }),
+  body('abonos').optional().isArray({ max: 500 }),
+  body('abonos.*.amount').isInt({ min: 1 }),
+  body('abonos.*.notes').optional().isString().isLength({ max: 500 }),
+  body('abonos.*.date').optional().isISO8601(),
+  body('validUntil').optional().isISO8601(),
+];
+const requestValidation = [
+  body('requestId').optional().isUUID().withMessage('Identificador de guardado inválido'),
 ];
 
-const updateQuoteValidation = [
-  body("description")
-    .optional()
-    .trim()
-    .isLength({ min: 20, max: 2000 })
-    .withMessage("Descripción debe tener entre 20 y 2000 caracteres"),
-  body("proposedWork")
-    .optional()
-    .trim()
-    .isLength({ min: 20, max: 2000 })
-    .withMessage("Trabajo propuesto debe tener entre 20 y 2000 caracteres"),
-  body("estimatedCost")
-    .optional()
-    .isFloat({ min: 0 })
-    .withMessage("Costo estimado debe ser mayor o igual a 0"),
-  body("notes")
-    .optional()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage("Notas no pueden exceder 1000 caracteres"),
-];
-
-const idValidation = [
-  param("id").isMongoId().withMessage("ID de presupuesto inválido"),
-];
-
-
-const abonoValidation = [
-  body("amount")
-    .isFloat({ min: 0.01 })
-    .withMessage("El monto debe ser mayor a 0"),
-  body("method")
-    .isIn(['cash', 'transfer', 'credit_card', 'debit_card', 'check'])
-    .withMessage("Método de pago inválido"),
-  body("notes")
-    .optional()
-    .trim()
-    .isLength({ max: 500 })
-    .withMessage("Las notas no pueden exceder 500 caracteres"),
-];
-
-// Rutas protegidas - Admin
-router.use(authenticate, authorize("admin"));
-
-router.get("/", listQuotes);
-router.get("/:id", idValidation, validate, getQuote);
-router.post("/", createQuoteValidation, validate, createQuote);
-router.put("/:id", idValidation, updateQuoteValidation, validate, updateQuote);
-router.post("/:id/send-email", idValidation, validate, sendQuoteEmail);
-router.put("/:id/approve", idValidation, validate, approveQuoteManual);
-router.put("/:id/reject", idValidation, validate, rejectQuoteManual);
-router.delete("/:id", idValidation, validate, deleteQuote);
-router.post('/:id/abonos', idValidation, abonoValidation, validate, addAbono);
-router.delete('/:id/abonos/:abonoIndex', idValidation, validate, removeAbono);
+router.get('/', query('trash').optional().isBoolean(), validate, controller.listQuotes);
+router.get('/:id/history', idValidation, validate, controller.getQuoteHistory);
+router.get('/:id', idValidation, validate, controller.getQuote);
+router.post(
+  '/',
+  quoteValidation,
+  body('clientId').notEmpty().isMongoId(),
+  requestValidation,
+  validate,
+  controller.createQuote
+);
+router.put(
+  '/:id',
+  idValidation,
+  quoteValidation,
+  body('expectedVersion').isInt({ min: 0 }),
+  validate,
+  controller.updateQuote
+);
+router.post('/:id/duplicate', idValidation, requestValidation, validate, controller.duplicateQuote);
+router.post('/:id/restore', idValidation, validate, controller.restoreQuote);
+router.post('/:id/send-email', idValidation, validate, controller.sendQuoteEmail);
+router.put('/:id/approve', idValidation, validate, controller.approveQuoteManual);
+router.put('/:id/reject', idValidation, validate, controller.rejectQuoteManual);
+router.delete('/:id', idValidation, validate, controller.deleteQuote);
+router.post(
+  '/:id/abonos',
+  idValidation,
+  body('amount').isInt({ min: 1 }),
+  body('notes').optional().isString().isLength({ max: 500 }),
+  validate,
+  controller.addAbono
+);
+router.delete(
+  '/:id/abonos/:abonoIndex',
+  idValidation,
+  param('abonoIndex').isInt({ min: 0 }),
+  validate,
+  controller.removeAbono
+);
 
 module.exports = router;

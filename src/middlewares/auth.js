@@ -1,5 +1,23 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Device = require('../models/Device');
+const { createHash } = require('crypto');
+
+const resolveUser = async (token) => {
+  let user;
+  if (token.startsWith('device_')) {
+    if (!/^device_[a-f0-9]{64}$/.test(token)) return null;
+    const device = await Device.findOne({ tokenHash: createHash('sha256').update(token).digest('hex'), revokedAt: null });
+    if (!device) return null;
+    user = await User.findById(device.userId);
+    if (user?.role !== 'admin') return null;
+  } else {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    user = await User.findById(decoded.userId);
+  }
+  if (!user || user.isDeleted || user.role !== 'admin') return null;
+  return token.startsWith('device_') || !user.isLocked() ? user : null;
+};
 
 // Middleware para verificar token JWT
 const authenticate = async (req, res, next) => {
@@ -20,10 +38,7 @@ const authenticate = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
 
     // Verificar token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // Buscar usuario
-    const user = await User.findById(decoded.userId);
+    const user = await resolveUser(token);
 
     if (!user || user.isDeleted) {
       return res.status(401).json({
@@ -36,7 +51,7 @@ const authenticate = async (req, res, next) => {
     }
 
     // Verificar si está bloqueado
-    if (user.isLocked()) {
+    if (!token.startsWith('device_') && user.isLocked()) {
       return res.status(401).json({
         success: false,
         error: {
@@ -134,5 +149,6 @@ const optionalAuth = async (req, res, next) => {
 module.exports = {
   authenticate,
   authorize,
-  optionalAuth
+  optionalAuth,
+  resolveUser
 };

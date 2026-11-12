@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const clientSchema = new mongoose.Schema(
   {
+    requestId: { type: String, select: false },
     firstName: {
       type: String,
       required: [true, "Nombre es obligatorio"],
@@ -10,7 +11,7 @@ const clientSchema = new mongoose.Schema(
     },
     lastName1: {
       type: String,
-      required: [true, "Apellido paterno es obligatorio"],
+      default: "",
       trim: true,
       maxlength: [100, "Apellido paterno no puede exceder 100 caracteres"],
     },
@@ -34,20 +35,18 @@ const clientSchema = new mongoose.Schema(
     },
     email: {
       type: String,
-      required: [true, "Email es obligatorio"],
-      unique: true,
+
       trim: true,
       // IMPORTANTE: Removí lowercase aquí para preservar el formato original
       // El email se normalizará en el setter personalizado
       set: function(email) {
         // Normalizar el email: trim y lowercase, pero SIN eliminar puntos
-        if (!email) return email;
-        return email.trim().toLowerCase();
+        return email?.trim().toLowerCase() || undefined;
       },
       validate: {
         validator: function(v) {
           // Validación más estricta de email
-          return /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(v);
+          return !v || /^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(v);
         },
         message: "Email no válido"
       }
@@ -71,8 +70,9 @@ const clientSchema = new mongoose.Schema(
   }
 );
 
+clientSchema.index({ requestId: 1 }, { unique: true, sparse: true });
+
 // Índices
-clientSchema.index({ email: 1 });
 clientSchema.index({ firstName: 1, lastName1: 1 });
 clientSchema.index({ isDeleted: 1, createdAt: -1 });
 clientSchema.index({ phone: 1 });
@@ -82,13 +82,14 @@ clientSchema.index(
   { email: 1, isDeleted: 1 },
   { 
     unique: true,
-    partialFilterExpression: { isDeleted: false }
+    name: "client_email_active",
+    partialFilterExpression: { isDeleted: false, email: { $type: "string" } }
   }
 );
 
 // Validación personalizada para email único considerando soft delete
 clientSchema.pre('save', async function(next) {
-  if (this.isModified('email') && !this.isDeleted) {
+  if (this.email && this.isModified('email') && !this.isDeleted) {
     const existingClient = await mongoose.model('Client').findOne({
       email: this.email,
       isDeleted: false,
@@ -106,7 +107,7 @@ clientSchema.pre('save', async function(next) {
 
 // Método para obtener nombre completo
 clientSchema.methods.getFullName = function () {
-  return `${this.firstName} ${this.lastName1} ${this.lastName2 || ""}`.trim();
+  return `${this.firstName} ${this.lastName1 || ""} ${this.lastName2 || ""}`.trim();
 };
 
 // Validar si se puede eliminar

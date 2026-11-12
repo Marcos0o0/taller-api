@@ -1,23 +1,22 @@
 const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
+const Counter = require("./Counter");
+const { calculateTotals } = require("../utils/quoteData");
 
 const vehicleSchema = new mongoose.Schema(
   {
     brand: {
       type: String,
-      required: [true, "Marca es obligatoria"],
       trim: true,
       maxlength: [100, "Marca no puede exceder 100 caracteres"],
     },
     model: {
       type: String,
-      required: [true, "Modelo es obligatorio"],
       trim: true,
       maxlength: [100, "Modelo no puede exceder 100 caracteres"],
     },
     year: {
       type: Number,
-      required: [true, "Año es obligatorio"],
       min: [1950, "Año debe ser mayor a 1950"],
       max: [
         new Date().getFullYear() + 1,
@@ -26,7 +25,6 @@ const vehicleSchema = new mongoose.Schema(
     },
     licensePlate: {
       type: String,
-      required: [true, "Patente es obligatoria"],
       trim: true,
       uppercase: true,
       maxlength: [20, "Patente no puede exceder 20 caracteres"],
@@ -259,10 +257,7 @@ const quoteSchema = new mongoose.Schema(
     // ✅ MEJORADO: Soporte para vehículo como objeto O referencia
     vehicle: {
       type: vehicleSchema,
-      required: function() {
-        // Solo requerido si no hay vehicleId
-        return !this.vehicleId;
-      },
+      default: () => ({}),
     },
     // ✅ NUEVO: Referencia a vehículo existente
     vehicleId: {
@@ -271,21 +266,35 @@ const quoteSchema = new mongoose.Schema(
     },
     description: {
       type: String,
-      required: [true, "Descripción es obligatoria"],
-      minlength: [20, "Descripción debe tener al menos 20 caracteres"],
+      default: "",
       maxlength: [2000, "Descripción no puede exceder 2000 caracteres"],
     },
     proposedWork: {
       type: String,
-      required: [true, "Trabajo propuesto es obligatorio"],
-      minlength: [20, "Trabajo propuesto debe tener al menos 20 caracteres"],
-      maxlength: [2000, "Trabajo propuesto no puede exceder 2000 caracteres"],
+      default: "",
     },
-    estimatedCost: {
-      type: Number,
-      required: [true, "Costo estimado es obligatorio"],
-      min: [0, "Costo debe ser mayor o igual a 0"],
-    },
+    legacyProposedWork: String,
+    items: { type: [{
+      _id: false,
+      type: { type: String, enum: ['service', 'part'], required: true },
+      name: { type: String, required: true, trim: true },
+      description: { type: String, default: '' },
+      quantity: { type: Number, required: true, min: 0 },
+      price: { type: Number, required: true, min: 0 },
+    }], default: undefined },
+    subtotal: Number,
+    tax: Number,
+    version: { type: Number, default: 0 },
+    history: { type: [{
+      _id: false,
+      version: Number,
+      changedAt: { type: Date, default: Date.now },
+      changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      action: String,
+      quote: mongoose.Schema.Types.Mixed,
+    }], default: [] },
+    requestId: { type: String },
+    estimatedCost: { type: Number, required: true, min: 0 },
     validUntil: {
       type: Date,
       default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 días
@@ -345,14 +354,15 @@ const quoteSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    optimisticConcurrency: true,
   }
 );
 
+quoteSchema.index({ requestId: 1 }, { unique: true, sparse: true });
+
 // Índices
-quoteSchema.index({ quoteNumber: 1 });
 quoteSchema.index({ clientId: 1, status: 1, createdAt: -1 });
 quoteSchema.index({ status: 1, createdAt: -1 });
-quoteSchema.index({ "approvalTokens.token": 1 });
 quoteSchema.index({ "vehicle.licensePlate": 1, isDeleted: 1 });
 quoteSchema.index({ vehicleId: 1 }); // ✅ NUEVO índice
 quoteSchema.index({ "workOrder.orderNumber": 1 });
@@ -372,8 +382,18 @@ quoteSchema.index(
 // Generar número de presupuesto automáticamente
 quoteSchema.pre("save", async function (next) {
   if (!this.quoteNumber) {
-    const count = await mongoose.model("Quote").countDocuments();
-    this.quoteNumber = `PRES-${String(count + 1).padStart(4, "0")}`;
+    const maximum = await mongoose.model('Quote').collection.aggregate([
+      { $match: { quoteNumber: /^PRES-\d+$/ } },
+      { $project: { number: { $convert: { input: { $arrayElemAt: [{ $split: ['$quoteNumber', '-'] }, 1] }, to: 'long', onError: 0, onNull: 0 } } } },
+      { $group: { _id: null, maximum: { $max: '$number' } } },
+    ]).toArray();
+    try {
+      await Counter.updateOne({ _id: 'quote' }, { $max: { value: maximum[0]?.maximum || 0 } }, { upsert: true });
+    } catch (error) {
+      if (error.code !== 11000) throw error;
+    }
+    const counter = await Counter.findOneAndUpdate({ _id: 'quote' }, { $inc: { value: 1 } }, { new: true });
+    this.quoteNumber = `PRES-${String(counter.value).padStart(4, '0')}`;
   }
 
   // Actualizar updatedAt del workOrder si existe
@@ -386,18 +406,13 @@ quoteSchema.pre("save", async function (next) {
 
 // ✅ NUEVO: Pre-save hook para validar y calcular abonos
 quoteSchema.pre('save', function(next) {
-  // Validar que se proporcione vehicle O vehicleId
-  if (!this.vehicle && !this.vehicleId) {
-    const error = new Error('Debe proporcionar datos del vehículo o una referencia a un vehículo existente');
-    error.name = 'ValidationError';
-    return next(error);
-  }
-
-  // Calcular totales de abonos automáticamente
-  if (this.isModified('abonos') || this.isNew) {
+  if (this.items?.length) {
+    Object.assign(this, calculateTotals(this.items.map((item) => item.toObject()), this.includeIVA, this.abonos));
+  } else {
     this.totalAbonos = this.abonos.reduce((sum, abono) => sum + abono.amount, 0);
     this.saldoPendiente = this.estimatedCost - this.totalAbonos;
   }
+  if (!this.isNew) this.version = (this.version || 0) + 1;
 
   // Validar que los abonos no excedan el costo estimado
   if (this.totalAbonos > this.estimatedCost) {
@@ -489,7 +504,7 @@ quoteSchema.pre('save', async function(next) {
   }
 
   // Validar patente (formato chileno básico) - solo si vehicle está definido
-  if (this.vehicle && this.isModified('vehicle.licensePlate')) {
+  if (this.vehicle?.licensePlate && this.isModified('vehicle.licensePlate')) {
     const plate = this.vehicle.licensePlate.toUpperCase().replace(/[\s-]/g, '');
     
     const isValidFormat = /^[A-Z]{2,4}\d{2,4}$/.test(plate);
@@ -516,7 +531,7 @@ quoteSchema.pre('save', async function(next) {
 // Validación del workOrder
 quoteSchema.pre('save', function(next) {
   // Si hay workOrder, validar sus campos
-  if (this.workOrder) {
+  if (this.workOrder && this.isModified("workOrder")) {
     // Validar costo final si existe
     if (this.workOrder.finalCost !== undefined && this.workOrder.finalCost < 0) {
       const error = new Error('El costo final debe ser mayor o igual a 0');
@@ -574,6 +589,7 @@ quoteSchema.methods.generateTokens = function () {
 quoteSchema.methods.validateToken = function (token) {
   const tokenObj = this.approvalTokens.find((t) => t.token === token);
 
+  if (this.isDeleted) return { valid: false, error: "Presupuesto eliminado" };
   if (!tokenObj) {
     return { valid: false, error: "Token inválido" };
   }
@@ -619,12 +635,12 @@ quoteSchema.methods.useToken = async function (token, ipAddress, userAgent) {
 quoteSchema.methods.addAbono = async function (amount, notes = '', registeredBy = null) {
   // Validar que el monto sea positivo
   if (amount <= 0) {
-    throw new Error('El monto del abono debe ser mayor a 0');
+    throw Object.assign(new Error('El monto del abono debe ser mayor a 0'), { status: 400 });
   }
 
   // Validar que no exceda el saldo pendiente
   if (amount > this.saldoPendiente) {
-    throw new Error(`El abono excede el saldo pendiente ($${this.saldoPendiente.toLocaleString('es-CL')})`);
+    throw Object.assign(new Error('El abono supera el saldo pendiente'), { status: 400 });
   }
 
   // Agregar el abono
@@ -644,12 +660,7 @@ quoteSchema.methods.addAbono = async function (amount, notes = '', registeredBy 
 // ✅ NUEVO: Método para eliminar abono
 quoteSchema.methods.removeAbono = async function (abonoIndex) {
   if (abonoIndex < 0 || abonoIndex >= this.abonos.length) {
-    throw new Error('Índice de abono inválido');
-  }
-
-  // Solo permitir eliminar si el presupuesto está pendiente
-  if (this.status !== 'pending') {
-    throw new Error('Solo se pueden eliminar abonos de presupuestos pendientes');
+    throw Object.assign(new Error('Ese abono ya no está disponible. Vuelve a abrir el presupuesto.'), { status: 400 });
   }
 
   this.abonos.splice(abonoIndex, 1);
@@ -691,12 +702,12 @@ quoteSchema.methods.getVehicleInfo = async function () {
 
 // Validar si se puede editar
 quoteSchema.methods.canEdit = function () {
-  return this.status === "pending" && !this.isDeleted && !this.workOrder;
+  return !this.isDeleted;
 };
 
 // Validar si se puede eliminar
 quoteSchema.methods.canDelete = function () {
-  return this.status === "pending" && !this.workOrder && !this.isDeleted;
+  return !this.isDeleted;
 };
 
 // Método para soft delete
@@ -950,6 +961,7 @@ quoteSchema.pre(/^find/, function (next) {
 // Hook post-save para enviar notificación cuando workOrder cambia a "listo"
 quoteSchema.post("save", async function (doc, next) {
   if (
+    doc.$locals.notifyWorkOrder &&
     doc.workOrder &&
     doc.workOrder.status === "listo" &&
     !doc.workOrder.readyEmailSent
@@ -992,6 +1004,7 @@ quoteSchema.post("save", async function (doc, next) {
 // Ocultar tokens en JSON (seguridad)
 quoteSchema.set("toJSON", {
   transform: (doc, ret) => {
+    delete ret.requestId;
     if (ret.approvalTokens) {
       ret.approvalTokens = ret.approvalTokens.map((t) => ({
         type: t.type,

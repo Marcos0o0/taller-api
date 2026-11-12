@@ -46,14 +46,6 @@ const refreshValidation = [
 ];
 
 // Rutas
-router.post('/register', 
-  authenticate, 
-  authorize('admin'), 
-  registerValidation, 
-  validate, 
-  register
-);
-
 router.post('/login', 
   authLimiter, 
   loginValidation, 

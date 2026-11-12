@@ -31,11 +31,11 @@ io.use(async (socket, next) => {
       return next(new Error('No token provided'));
     }
 
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    socket.userId = decoded.id;
-    socket.userRole = decoded.role;
+    const { resolveUser } = require('./middlewares/auth');
+    const user = await resolveUser(token);
+    if (!user || user.role !== 'admin') return next(new Error('Authentication failed'));
+    socket.userId = user._id;
+    socket.userRole = user.role;
 
     next();
   } catch (error) {
@@ -47,7 +47,7 @@ io.use(async (socket, next) => {
 // ✅ Configurar alertService con io (una sola vez, fuera del bloque connection)
 const alertService = require('./services/alertService');
 alertService.setIO(io);
-alertService.iniciarMonitoreo(30); // verificar alertas cada 30 minutos
+if (process.env.NODE_ENV !== 'test') alertService.iniciarMonitoreo(30); // verificar alertas cada 30 minutos
 
 // ✅ Manejo de conexiones WebSocket
 io.on('connection', (socket) => {
@@ -150,11 +150,14 @@ app.use('/api', require('./routes/appVersionRoutes'));
 
 // API Routes (con autenticación)
 app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/users', require('./routes/userRoutes'));
+app.use('/api/devices', require('./routes/deviceRoutes'));
 app.use('/api/clients', require('./routes/clientRoutes'));
 app.use('/api/quotes', require('./routes/quoteRoutes'));
-app.use('/api/orders', require('./routes/orderRoutes'));
-app.use('/api/mechanics', require('./routes/mechanicRoutes'));
+app.use('/api/orders', (req, res, next) => {
+  if (req.method !== 'GET') return res.status(405).json({ success: false, error: { code: 'HISTORY_ONLY', message: 'Las órdenes anteriores se conservan como historial de consulta.' } });
+  next();
+}, require('./routes/orderRoutes'));
+
 app.use('/api/dashboard', require('./routes/dashboardRoutes'));
 app.use('/api/inventory', require('./routes/inventoryRoutes'));
 app.use('/api/vehicles', require('./routes/vehicleRoutes'));
@@ -177,7 +180,7 @@ app.get('/', (req, res) => {
       clients: '/api/clients',
       quotes: '/api/quotes',
       orders: '/api/orders',
-      mechanics: '/api/mechanics',
+      devices: '/api/devices',
       inventory: '/api/inventory',
       alerts: '/api/alerts',
       appVersion: '/api/app-version.json',

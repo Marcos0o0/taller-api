@@ -59,7 +59,6 @@ const userSchema = new mongoose.Schema({
 });
 
 // Índices
-userSchema.index({ username: 1 });
 userSchema.index({ role: 1, isDeleted: 1 });
 
 // Hash password antes de guardar
@@ -86,21 +85,18 @@ userSchema.methods.isLocked = function() {
 
 // Incrementar intentos de login fallidos
 userSchema.methods.incLoginAttempts = async function() {
-  if (this.lockUntil && this.lockUntil < Date.now()) {
-    await this.updateOne({
-      $set: { loginAttempts: 1 },
-      $unset: { lockUntil: 1 }
-    });
-    return;
-  }
-  
-  const updates = { $inc: { loginAttempts: 1 } };
-  
-  if (this.loginAttempts + 1 >= 5 && !this.isLocked()) {
-    updates.$set = { lockUntil: Date.now() + 15 * 60 * 1000 };
-  }
-  
-  await this.updateOne(updates);
+  const updated = await this.constructor.findOneAndUpdate({ _id: this._id }, [
+    { $set: { loginAttempts: { $cond: [
+      { $and: [{ $ne: ['$lockUntil', null] }, { $lt: ['$lockUntil', '$$NOW'] }] },
+      1, { $add: [{ $ifNull: ['$loginAttempts', 0] }, 1] },
+    ] } } },
+    { $set: { lockUntil: { $cond: [
+      { $gte: ['$loginAttempts', 5] },
+      { $add: ['$$NOW', 15 * 60 * 1000] }, null,
+    ] } } },
+  ], { new: true });
+  this.loginAttempts = updated.loginAttempts;
+  this.lockUntil = updated.lockUntil;
 };
 
 // Resetear intentos de login

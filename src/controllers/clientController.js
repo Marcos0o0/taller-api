@@ -1,3 +1,4 @@
+const clientSearch = require('../utils/clientSearch');
 const Client = require("../models/Client");
 const Quote = require("../models/Quote");
 const cacheService = require("../services/cacheService");
@@ -42,12 +43,7 @@ const listClients = asyncHandler(async (req, res) => {
 
   // Búsqueda por nombre, apellido o email
   if (search) {
-    query.$or = [
-      { firstName: { $regex: search, $options: "i" } },
-      { lastName1: { $regex: search, $options: "i" } },
-      { lastName2: { $regex: search, $options: "i" } },
-      { email: { $regex: search, $options: "i" } },
-    ];
+    Object.assign(query, clientSearch(search));
   }
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -129,10 +125,15 @@ const getClient = asyncHandler(async (req, res) => {
 // @route   POST /api/clients
 // @access  Admin
 const createClient = asyncHandler(async (req, res) => {
-  const { firstName, lastName1, lastName2, phone, email } = req.body;
+  const { firstName, lastName1, lastName2, phone, email, requestId } = req.body;
+  if (requestId) {
+    const existing = await Client.findOne({ requestId });
+    if (existing) return res.json({ success: true, data: { client: existing } });
+  }
 
   // Verificar si el email ya existe
-  const existingClient = await Client.findOne({ email, isDeleted: false });
+  const normalizedEmail = email?.trim().toLowerCase();
+  const existingClient = normalizedEmail ? await Client.findOne({ email: normalizedEmail, isDeleted: false }) : null;
 
   if (existingClient) {
     return res.status(409).json({
@@ -145,13 +146,19 @@ const createClient = asyncHandler(async (req, res) => {
   }
 
   // Crear cliente
-  const client = await Client.create({
+  let client;
+  try { client = await Client.create({
+    requestId,
     firstName,
     lastName1,
     lastName2,
     phone,
-    email,
-  });
+    email: normalizedEmail || undefined,
+  }); } catch (error) {
+    if (error.code !== 11000 || !requestId) throw error;
+    client = await Client.findOne({ requestId });
+    if (!client) throw error;
+  }
 
   console.log(`Cliente creado: ${client.email} por usuario ID: ${req.userId}`);
 
@@ -216,10 +223,10 @@ const updateClient = asyncHandler(async (req, res) => {
 
   // Actualizar campos
   if (firstName) client.firstName = firstName;
-  if (lastName1) client.lastName1 = lastName1;
+  if (lastName1 !== undefined) client.lastName1 = lastName1;
   if (lastName2 !== undefined) client.lastName2 = lastName2;
   if (phone) client.phone = phone;
-  if (email) client.email = email;
+  if (email !== undefined) client.email = email;
 
   await client.save();
 
