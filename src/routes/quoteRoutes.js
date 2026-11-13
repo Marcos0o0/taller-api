@@ -32,6 +32,7 @@ const quoteValidation = [
   body('includeIVA').optional().isBoolean(),
   body('estimatedCost').optional().isInt({ min: 0 }),
   body('items').optional().isArray({ min: 1, max: 500 }),
+  body('items.*.quantity').isInt({ min: 1 }).withMessage('La cantidad debe ser un número entero mayor a cero'),
   body('abonos').optional().isArray({ max: 500 }),
   body('abonos.*.amount').isInt({ min: 1 }),
   body('abonos.*.notes').optional().isString().isLength({ max: 500 }),

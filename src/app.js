@@ -151,6 +151,7 @@ app.use('/api', require('./routes/appVersionRoutes'));
 // API Routes (con autenticación)
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/devices', require('./routes/deviceRoutes'));
+app.use('/api/writing', require('./routes/writingRoutes'));
 app.use('/api/clients', require('./routes/clientRoutes'));
 app.use('/api/quotes', require('./routes/quoteRoutes'));
 app.use('/api/orders', (req, res, next) => {

@@ -41,7 +41,7 @@ En la app de Windows se conservan Electron, React y Ant Design.
 ```powershell
 npm ci --legacy-peer-deps
 npm run build:check
-node --test electron/devicePolicy.test.ts electron/ipc.test.ts src/utils/quoteItems.test.ts
+node --test electron/devicePolicy.test.ts electron/ipc.test.ts electron/pdfFiles.test.ts src/utils/editorItems.test.ts src/utils/quoteItems.test.ts
 npm run electron:build
 ```
 
@@ -49,8 +49,16 @@ Las pruebas TypeScript con node --test usan Node 24 o posterior. El cliente de p
 
 ## Recuperación y límites
 
+### Corrección de escritura
+
+En Railway, servicio taller-api → Variables, configurar `GEMINI_API_KEY` con una clave del proyecto de Google que tenga saldo disponible. Para ensayos locales, usar la misma variable en `.env.local` de taller-api, ignorado por Git. No ponerla en VITE_API_KEY ni en el repositorio de escritorio. `GEMINI_MODEL` permite seleccionar el modelo; por defecto se utiliza `gemini-3.5-flash-lite`.
+
+Solo se envía el nombre del trabajo o repuesto al salir del campo. La corrección ofrece Deshacer y conserva el texto ante fallos, falta de saldo o límite de uso. Hay caché de textos repetidos, un máximo de 30 solicitudes por minuto por propietario y 2.000 consultas al proveedor por mes para el taller. Son límites de consultas, no un límite de facturación de Google. Revisar también el saldo del proyecto en AI Studio.
+
+El PDF se guarda directamente en Descargas, sin abrir el Explorador ni sobrescribir copias previas. El enlace de WhatsApp prepara el mensaje; adjuntar y enviar automáticamente requiere una integración separada con WhatsApp Business Platform.
+
 Los borradores se guardan localmente. Un borrador de una versión anterior se conserva y avisa del conflicto al guardar. Un presupuesto no cuenta como guardado en MongoDB hasta que el servidor confirma la operación.
 
 Para volver a una versión anterior, detener las escrituras y restaurar el respaldo de la base y el ejecutable correspondiente. La versión antigua exige correo y restringe presupuestos aceptados, por lo que volver solo al ejecutable anterior puede impedir editar los registros nuevos.
 
-Quedan para entregas posteriores la IA de escritura, el dictado, el bot de WhatsApp y la agenda. La impresión física y el envío a clientes deben verificarse en el taller. El texto truncado por versiones anteriores requiere otra copia o un respaldo para recuperarse.
+Quedan para entregas posteriores el dictado, el bot de WhatsApp y la agenda. La impresión física y el envío a clientes deben verificarse en el taller. El texto truncado por versiones anteriores requiere otra copia o un respaldo para recuperarse.

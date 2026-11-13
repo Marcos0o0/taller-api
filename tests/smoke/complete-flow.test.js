@@ -61,6 +61,13 @@ test('permite varios clientes sin correo y un presupuesto sin vehículo', async 
   expect(quote.items[0].name).toBe(line.name);
 });
 
+test('rechaza cantidades decimales en presupuestos nuevos y protege la corrección de escritura', async () => {
+  const client = await createClient();
+  await api('post', '/api/quotes').send({ clientId: client._id, items: [{ ...line, quantity: 1.5 }] }).expect(400);
+  await request(app).post('/api/writing/correct').send({ text: 'Trabajo' }).expect(401);
+  await api('post', '/api/writing/correct').send({ text: 'x'.repeat(501) }).expect(400);
+});
+
 test('aceptar no crea una orden y editar importes devuelve a pendiente con historial', async () => {
   const quote = await createQuote();
   const accepted = await api('put', `/api/quotes/${quote._id}/approve`).send({}).expect(200);
