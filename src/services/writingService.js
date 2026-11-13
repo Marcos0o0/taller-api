@@ -6,8 +6,8 @@ const instruction = 'Corrige únicamente ortografía, tildes, puntuación y conc
 async function correctWriting(text) {
   const original = text.trim();
   const unchanged = (reason) => ({ text: original, available: false, reason });
-  if (!process.env.GEMINI_API_KEY?.trim()) return unchanged('disabled');
-  const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+  if (!process.env.GROQ_API_KEY?.trim()) return unchanged('disabled');
+  const model = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
   const key = model + ':' + original;
   if (cache.has(key)) return { text: cache.get(key), available: true };
   try {
@@ -17,21 +17,30 @@ async function correctWriting(text) {
     );
     if (usage.value > 2000) return unchanged('limit');
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      'https://api.groq.com/openai/v1/chat/completions',
       {
-        systemInstruction: { parts: [{ text: instruction }] },
-        contents: [{ role: 'user', parts: [{ text: JSON.stringify({ text: original }) }] }],
-        generationConfig: {
-          maxOutputTokens: 512,
-          responseMimeType: 'application/json',
-          responseSchema: { type: 'OBJECT', properties: { text: { type: 'STRING' } }, required: ['text'] },
+        model,
+        messages: [
+          { role: 'system', content: instruction },
+          { role: 'user', content: JSON.stringify({ text: original }) },
+        ],
+        reasoning_effort: 'low',
+        include_reasoning: false,
+        max_completion_tokens: 1024,
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'writing_correction',
+            strict: true,
+            schema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
+          },
         },
       },
-      { headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY.trim() }, timeout: 8000, signal: AbortSignal.timeout(8000), maxContentLength: 20000 }
+      { headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY.trim()}` }, timeout: 8000, signal: AbortSignal.timeout(8000), maxContentLength: 20000 }
     );
-    const candidate = response.data?.candidates?.[0];
-    if (candidate?.finishReason !== 'STOP') return unchanged('unavailable');
-    const raw = candidate.content?.parts?.filter(part => !part.thought).map(part => part.text || '').join('');
+    const candidate = response.data?.choices?.[0];
+    if (candidate?.finish_reason !== 'stop') return unchanged('unavailable');
+    const raw = candidate.message?.content;
     const corrected = JSON.parse(raw).text?.trim();
     const numbers = value => value.match(/\d+(?:[.,/-]\d+)*/g) || [];
     const codes = value => value.match(/\b[A-Z][A-Z0-9-]{1,}\b/g) || [];

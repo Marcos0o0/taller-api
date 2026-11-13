@@ -51,9 +51,9 @@ Las pruebas TypeScript con node --test usan Node 24 o posterior. El cliente de p
 
 ### Corrección de escritura
 
-En Railway, servicio taller-api → Variables, configurar `GEMINI_API_KEY` con una clave del proyecto de Google que tenga saldo disponible. Para ensayos locales, usar la misma variable en `.env.local` de taller-api, ignorado por Git. No ponerla en VITE_API_KEY ni en el repositorio de escritorio. `GEMINI_MODEL` permite seleccionar el modelo; por defecto se utiliza `gemini-3.5-flash-lite`.
+En Railway, servicio taller-api → Variables, configurar `GROQ_API_KEY` con una clave de GroqCloud. Para ensayos locales, usar la misma variable en `.env.local` de taller-api, ignorado por Git. No ponerla en VITE_GROQ_API_KEY ni en el repositorio de escritorio. `GROQ_MODEL` permite seleccionar un modelo compatible con salida JSON estricta y razonamiento bajo; por defecto se utiliza `openai/gpt-oss-20b`. La app de escritorio mantiene la misma ruta y no necesita recompilarse al cambiar de proveedor.
 
-Solo se envía el nombre del trabajo o repuesto al salir del campo. La corrección ofrece Deshacer y conserva el texto ante fallos, falta de saldo o límite de uso. Hay caché de textos repetidos, un máximo de 30 solicitudes por minuto por propietario y 2.000 consultas al proveedor por mes para el taller. Son límites de consultas, no un límite de facturación de Google. Revisar también el saldo del proyecto en AI Studio.
+Solo se envía el nombre del trabajo o repuesto al salir del campo. La corrección ofrece Deshacer y conserva el texto ante fallos o límite de uso. Hay caché de textos repetidos, un máximo de 30 solicitudes por minuto por propietario y 2.000 consultas al proveedor por mes para el taller. Son límites de consultas, no un límite de facturación. Mantener la cuenta en el plan gratuito y revisar las cuotas de GroqCloud; si se agotan, se conserva el texto escrito.
 
 El PDF se guarda directamente en Descargas, sin abrir el Explorador ni sobrescribir copias previas. El enlace de WhatsApp prepara el mensaje; adjuntar y enviar automáticamente requiere una integración separada con WhatsApp Business Platform.
 
